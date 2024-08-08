@@ -2,8 +2,44 @@ let canvas = document.querySelector("#canvas");
 let ctx = canvas.getContext("2d");
 canvas.style.width = window.innerWidth + "px";
 canvas.style.height = window.innerHeight + "px";
-let canvasDivision = 4;
+let canvasDivision = 3;
 if (ctx.roundRect === undefined) ctx.roundRect = ctx.rect;
+
+let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
+
+let gameState = "menu";
+
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, cameraDistance = null, bloom = null;
+let bulletVel = null;
+let planeBaseVel = null;
+let enemyLeadsAim = null;
+let mapBoundaries = null;
+let gameActive = false;
+
+let player = null, enemy = null, map = null, fire = null, gun = null;
+
+function resetValues() {
+  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10;
+  planeBaseVel = 1.5;
+  enemyLeadsAim = true;
+  shapes = []; bullets = [];
+  player = copyShape(planeTemplate); player.move([0, 2, 4]); if (cameraDistance > 0) shapes.push(player); 
+  map = copyShape(mapTemplate); shapes.push(map);
+  enemy = copyShape(enemyTemplate); 
+  enemy.moveInDirection(150);
+  fire = copyShape(fireTemplate);
+  gun = copyShape(gunTemplate); gun.viewmodel = true; gun.move([-1.2, -.5, 2.5]); shapes.push(gun); gun.turn([-Math.PI/2, 0, 0]);
+  //enemy.update(Math.PI, "yaw");
+  //shapes.push(enemy);
+  mapBoundaries = [Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[0])))), 
+  Math.min(...map.polys.map(poly => Math.min(...poly.map(pt => pt[0])))),
+  Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[2])))),
+  Math.min(...map.polys.map(poly => Math.min(...poly.map(pt => pt[2])))),
+  Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[1]))))];
+  gameActive = true;
+  camAngle = [0, 0];
+}
 
 function mapWhilePreserve(list, fn) {
   for (let i = 0; i < list.length; i++) {
@@ -15,18 +51,19 @@ function interpolateDepth(d1, d2, distAlong, fullDist) {
   return (d2-d1)*(distAlong/fullDist)+d1;
 }
 
-function drawPixel (canvasData, depthBuffer, x, y, r, g, b, depth) {
+function drawPixel(canvasData, depthBuffer, x, y, r, g, b, depth, viewmodelBuffer, viewmodel=false) {
   if (x < 0 || x >= canvas.width || y < 0 || y > canvas.height) return;
   var index = (x + y * canvas.width) * 4;  
-  if (depth < 0 || depthBuffer[index] !== undefined && depthBuffer[index] < depth) return;
+  if ((viewmodelBuffer[index]===true && !viewmodel) || depth < 0 || (((!viewmodel)||viewmodelBuffer[index]) && (depthBuffer[index] !== undefined && depthBuffer[index] < depth))) return;
   depthBuffer[index] = depth;
+  if (viewmodel) viewmodelBuffer[index] = true;
   let fogIncrease = 3*Math.sqrt(depth);
   canvasData.data[index + 0] = Math.min(r + fogIncrease, 255);
   canvasData.data[index + 1] = Math.min(g + fogIncrease, 255);
   canvasData.data[index + 2] = Math.min(b + fogIncrease, 255);
   canvasData.data[index + 3] = 255;
 }
-function drawTopTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
+function drawTopTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel=false) {
   let slope1 = (p2[0]-p1[0])/(p2[1]-p1[1]);
   let slope2 = (p3[0]-p1[0])/(p3[1]-p1[1]);
   let switched = slope1 > slope2;
@@ -37,7 +74,7 @@ function drawTopTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
     if (y >= 0 && y <= canvas.height) {
       for (let x = Math.max(Math.floor(curXs[0]), 0); x <= Math.min(curXs[1], canvas.width); x++) {
         drawPixel(canvasData, depthBuffer, Math.round(x), Math.round(y), mtl[0], mtl[1], mtl[2], 
-          1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0]))
+          1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0])), viewmodelBuffer, viewmodel
         );
       }
     }
@@ -49,7 +86,7 @@ function drawTopTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
   }
 }
 
-function drawBottomTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
+function drawBottomTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel=false) {
   let slope1 = (p2[0]-p1[0])/(p2[1]-p1[1]);
   let slope2 = (p3[0]-p1[0])/(p3[1]-p1[1]);
   let switched = slope1 < slope2;
@@ -60,7 +97,7 @@ function drawBottomTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
     if (y >= 0 && y <= canvas.height) {
       for (let x = Math.max((curXs[0]), 0); x <= Math.min(curXs[1], canvas.width); x++) {
         drawPixel(canvasData, depthBuffer, Math.round(x), Math.round(y), mtl[0], mtl[1], mtl[2], 
-          1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0]))
+          1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0])), viewmodelBuffer, viewmodel
         );
       }
     }
@@ -71,7 +108,7 @@ function drawBottomTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
     if (switched) depths = [depths[1], depths[0]];
   }
 }
-function drawTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
+function drawTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel=false) {
   let pts = [p1, p2, p3].map(pt => mapWhilePreserve(pt, Math.round));
   if (pts.some(pt => pt.some(n => Number.isNaN(n)||!Number.isFinite(n)))) return;
   let ptOutsideList = [];
@@ -85,53 +122,19 @@ function drawTri(p1, p2, p3, canvasData, depthBuffer, mtl) {
   }
   if (ptOutsideList.every(outside => outside.length > 0) && ptOutsideList.every(outside => outside.every(location => ptOutsideList.every(list => list.includes(location))))) return;
   pts.sort((a, b) => a[1]-b[1]);
-  if (pts[1][1] === pts[2][1]) {drawTopTri(pts[0], pts[1], pts[2], canvasData, depthBuffer, mtl);return;}
-  if (pts[0][1] === pts[1][1]) {drawBottomTri(pts[2], pts[1], pts[0], canvasData, depthBuffer, mtl);return;}
+  if (pts[1][1] === pts[2][1]) {drawTopTri(pts[0], pts[1], pts[2], canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel);return;}
+  if (pts[0][1] === pts[1][1]) {drawBottomTri(pts[2], pts[1], pts[0], canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel);return;}
   let p4 = [pts[0][0] + ((pts[1][1] - pts[0][1]) / (pts[2][1] - pts[0][1])) * (pts[2][0] - pts[0][0]), pts[1][1]];
   p4.depth = interpolateDepth(pts[0].depth, pts[2].depth, p4[1]-pts[0][1], pts[2][1]-pts[0][1]);
-  drawTopTri(pts[0], pts[1], p4, canvasData, depthBuffer, mtl);
-  drawBottomTri(pts[2], p4, pts[1], canvasData, depthBuffer, mtl);
+  drawTopTri(pts[0], pts[1], p4, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel);
+  drawBottomTri(pts[2], p4, pts[1], canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel);
 }
-function drawPoly(pts, canvasData, depthBuffer, mtl) {
+function drawPoly(pts, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel=false) {
   for (let i = 0; i < pts.length-2; i++) {
-    drawTri(pts[0], pts[i+1], pts[i+2], canvasData, depthBuffer, mtl);
+    drawTri(pts[0], pts[i+1], pts[i+2], canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel);
   }
 }
 
-
-let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
-
-let gameState = "menu";
-
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, planeRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null;
-let bulletVel = null;
-let planeBaseVel = null;
-let enemyLeadsAim = null;
-let mapBoundaries = null;
-let gameActive = false;
-
-let player = null, enemy = null, map = null, fire = null;
-
-function resetValues() {
-  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 3; gravity = .4, step = 0.1; accelFactor = 1.5;
-  planeBaseVel = 1.5;
-  enemyLeadsAim = true;
-  shapes = []; bullets = [];
-  player = copyShape(planeTemplate); /*shapes.push(plane);*/ player.move([0, 10, 0]);
-  map = copyShape(mapTemplate); shapes.push(map);
-  enemy = copyShape(enemyTemplate); 
-  enemy.moveInDirection(150);
-  //enemy.update(Math.PI, "yaw");
-  //shapes.push(enemy);
-  mapBoundaries = [Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[0])))), 
-  Math.min(...map.polys.map(poly => Math.min(...poly.map(pt => pt[0])))),
-  Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[2])))),
-  Math.min(...map.polys.map(poly => Math.min(...poly.map(pt => pt[2])))),
-  Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[1]))))];
-  gameActive = true;
-  camAngle = [0, 0];
-}
 
 class matrix {
   constructor(list) {
@@ -179,14 +182,22 @@ class Shape {
   move(offset) {
     this.offset = this.offset.map((el, idx) => el+offset[idx]);
     this.polys = this.polys.map(poly => {
-      let newPoly = poly.map(pt => pt.map((el, idx) => el+offset[idx]));
+      let newPoly = poly.map(pt => pt.map((el, idx) => Number(el)+offset[idx]));
       newPoly.mtl = poly.mtl;
       newPoly.cross = poly.cross;
       return newPoly;
     });
+    if (this.rotatedPolys !== null) {
+      this.rotatedPolys = this.rotatedPolys.map(poly => {
+        let newPoly = poly.map(pt => pt.map((el, idx) => Number(el)+offset[idx]));
+        newPoly.mtl = poly.mtl;
+        newPoly.cross = poly.cross;
+        return newPoly;
+      });
+    }
   }
   moveInDirection(dist) {
-    this.move([dist*Math.sin(this.rotate[0])*Math.cos(this.rotate[1]), dist*Math.sin(this.rotate[1]), dist*Math.cos(this.rotate[0])*Math.cos(this.rotate[1])]);
+    this.move(times(vecFromAngle(this.rotate), dist));
   }
   turn(direction) {
     this.rotate = this.rotate.map((n, idx) => n + direction[idx]);
@@ -247,7 +258,11 @@ function unit(list) {
   return list.map(n => n/dist);
 }
 function distance(pt1, pt2) {
-  return Math.sqrt(pt1.map((n, idx) => (n-pt2[idx])**2).reduce((a, b) => a+b));
+  if (pt2 === undefined) pt2 = [];
+  return Math.sqrt(pt1.map((n, idx) => (n-(pt2[idx]||0))**2).reduce((a, b) => a+b));
+}
+function vecFromAngle(angle) {
+  return [-Math.sin(angle[0])*Math.cos(angle[1]), Math.sin(angle[1]), Math.cos(angle[0])*Math.cos(angle[1])];
 }
 function leadAim(initPos, targetPos, speed, targetVel) {
   let collisionPos = targetPos, time = null;
@@ -299,6 +314,33 @@ function sphereHitsPoly(sphereCenter, radius, poly, vec=false) {
   }
   return false;
 }
+function rayHitsPoly(start, poly, vector) {
+  vector = unit(vector);
+  let centroid = center(poly);
+  let dist = distInDir(poly.cross, centroid, start);
+  let normal = dist < 0 ? poly.cross : times(poly.cross, -1);
+  let angle = Math.acos(dotProduct(vector, normal));
+  if (angle >= Math.PI/2) {return false;}
+  let potentialCollision = plus(start, times(vector, Math.abs(dist)/Math.cos(angle)));
+  if (ptHitsTri(potentialCollision, 0, poly)) {
+    return {collision: potentialCollision, distance: Math.abs(dist)/Math.cos(angle)};
+  }
+  return false;
+}
+function findRaycast(start, shapes, vector) {
+  let closest = null;
+  for (let shape of shapes) {
+    for (let poly of shape.polys) {
+      let collision = rayHitsPoly(start, poly, vector);
+      if (collision && (closest === null || collision.distance < closest.distance)) {
+        closest = collision;
+        closest.poly = poly;
+        closest.shape = shape;
+      }
+    }
+  }
+  return closest;
+}
 
 let camFollow = null;
 
@@ -315,7 +357,7 @@ function circle(x, y, radius) {
 let camAngle = [0, 0], camPos = [0, 0, 0];
 
 function project(point) {
-  return [-point[0]/(point[2])*canvas.width/2.5+canvas.width/2, -point[1]/Math.abs(point[2])*canvas.height/1.8+canvas.height/2];
+  return [-point[0]/(point[2])*Math.tan(Math.PI/2-FOV[0]/2)/2*canvas.width+canvas.width/2, -point[1]/Math.abs(point[2])*Math.tan(Math.PI/2-FOV[1]/2)/2*canvas.height+canvas.height/2];
 }
 function clear(canvas) {
 	let ctx = canvas.getContext("2d");
@@ -333,7 +375,7 @@ setInterval(function() {
   if (gameState === "playing" && !isLoading) {
     canvas.width = window.innerWidth/canvasDivision;
     canvas.height = window.innerHeight/canvasDivision;
-    let cameraSpeed = 1, cameraDistance = 0;
+    let cameraSpeed = 1;
     camFollow = player;
     if (camFollow === null) {
       if (keys["w"]) {
@@ -365,7 +407,7 @@ setInterval(function() {
       if (keys["s"]) accelVec = plus(accelVec, [Math.sin(camAngle[0]), -Math.cos(camAngle[0])]);
       if (keys["a"]) accelVec = plus(accelVec, [Math.cos(camAngle[0]), Math.sin(camAngle[0])]);
       if (keys["d"]) accelVec = plus(accelVec, [-Math.cos(camAngle[0]), -Math.sin(camAngle[0])]);
-      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor)), .5);
+      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"] ? .5 : 1))), .5);
       playerVel = [horizVel[0], playerVel[1], horizVel[1]];
       let physicsSteps = 2;
       for (let i = 0; i < physicsSteps; i++) {
@@ -384,17 +426,45 @@ setInterval(function() {
         for (let poly of map.polys) {
           let collides = sphereHitsPoly(player.offset, playerRadius, poly)
           if (collides !== false) {
-            playerVel[1] = 0;
-            hitGround = true;
-            while (sphereHitsPoly(player.offset, playerRadius, poly)) {
-              player.move([0, playerVel[1] <= 0 ? .1 : -.1, 0]);
+            if (playerVel[1] < 0) {
+              if (-playerVel[1] > 5) {
+                hp -= -playerVel[1]*4;
+                pain += .3;
+              }
+              hitGround = true;
             }
+            while (sphereHitsPoly(player.offset, playerRadius, poly)) {
+              player.move([0, playerVel[1] <= 0 ? step : -step, 0]);
+            }
+            playerVel[1] = 0;
           }
         }
         if (hitGround && keys[" "]) {
           playerVel[1] += jumpSpeed;
         } else {
           playerVel[1] -= gravity/physicsSteps;
+        }
+        let idealBloom = distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5+Math.PI/50;
+        bloom += (idealBloom-bloom)*.7;
+
+        if (mouseDown) {
+          mouseDown = false;
+          let shotAngle = camAngle.map(n=>n);
+          let bloomAngle = Math.random()*2*Math.PI, bloomWidth = (Math.random()-.5)*bloom;
+          shotAngle[1] += Math.sin(bloomAngle)*bloomWidth;
+          shotAngle[0] += Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1])));
+          let shotVec = vecFromAngle(shotAngle);
+          let hit = findRaycast(camPos, [map], shotVec);
+          if (hit !== null) {
+            if (hit.shape === map) {
+              let bulletHole = copyShape(bulletHoleTemplate);
+              bulletHole.move(minus(hit.collision, bulletHole.offset));
+              let cross = hit.poly.cross;
+              bulletHole.turn([Math.atan2(cross[2], cross[0])+Math.PI/2, Math.PI/2-Math.atan2(cross[1], Math.sqrt(cross[0]**2+cross[2]**2)), 0]);
+              bulletHole.move(times(cross, distInDir(cross, camPos, center(hit.poly)) < 0 ? .1 : -.1));
+              shapes.push(bulletHole);
+            }
+          }
         }
       }
     }
@@ -409,22 +479,24 @@ setInterval(function() {
     for (let shape of shapes) {
       let transformCache = new Map();
       for (let poly of (shape.rotatedPolys === null ? shape.polys : shape.rotatedPolys)) {
-        let pts = poly.map(pt => [[pt[0]-shape.offset[0]], [pt[1]-shape.offset[1]], [pt[2]-shape.offset[2]]]);
+        let pts = poly.map(pt => [[pt[0]], [pt[1]], [pt[2]]]);
 
-        let cross = poly.cross;
+        let cross = poly.cross; if (shape.viewmodel) cross = unit(plus(times(vecFromAngle(camAngle), .4), cross));
         let dot = dotProduct(cross, unit([.5, -1, 0]));
 
-        let cameraDot = dotProduct(cross, unit([pts[1][0]-camPos[0]+shape.offset[0], pts[1][1]-camPos[1]+shape.offset[1], pts[1][2]-camPos[2]+shape.offset[2]]));
-        pts = pts.map(pt => {
-          let str = JSON.stringify(pt);
-          if (transformCache.has(str)) {
-            return transformCache.get(str)
-          } else {
-            let transformed = transformCamera.multiply(matrix.from([[pt[0]-camPos[0]+shape.offset[0]], [pt[1]-camPos[1]+shape.offset[1]], [pt[2]-camPos[2]+shape.offset[2]]])).list;
-            transformCache.set(str, transformed);
-            return transformed;
-          }
-        });
+        let cameraDot = dotProduct(cross, unit([pts[1][0]-camPos[0], pts[1][1]-camPos[1], pts[1][2]-camPos[2]]));
+        if (!shape.viewmodel) {
+          pts = pts.map(pt => {
+            let str = JSON.stringify(pt);
+            if (transformCache.has(str)) {
+              return transformCache.get(str)
+            } else {
+              let transformed = transformCamera.multiply(matrix.from([[pt[0]-camPos[0]], [pt[1]-camPos[1]], [pt[2]-camPos[2]]])).list;
+              transformCache.set(str, transformed);
+              return transformed;
+            }
+          });
+        }
         if (pts.some(pt => pt[2] < 0)) {
           pts = pts.map(pt => pt.map(arr=>arr[0]))
           let usable = pts.filter(pt => pt[2] > 0);
@@ -456,21 +528,23 @@ setInterval(function() {
         }
         let centroid = center(pts);
         
-        if (cameraDot > 0) dot = -dot;
+        if (!shape.viewmodel && cameraDot > 0) dot = -dot;
         let rgb = null;
         if (poly.mtl in materials) rgb = materials[poly.mtl];
         else rgb = [128, 128, 128];
         rgb = rgb.map(n => n*(1-dot/2.5));
         pts.mtl = rgb;
         pts.meanZ = Math.sqrt((centroid[0])**2+(centroid[1])**2+(centroid[2])**2);
+        pts.viewmodel = shape.viewmodel === true;
         renderList.push(pts);
       }
     }
     renderList.sort((a, b) => b.meanZ-a.meanZ);
     var canvasData = ctx.createImageData(canvas.width, canvas.height);
     let depthBuffer = Object.create(null);
+    let viewmodelBuffer = Object.create(null);
     for (let pts of renderList) {
-      drawPoly(pts.map(pt => {let newPt = project(pt); newPt.depth = 1/pt[2][0];  return newPt;}), canvasData, depthBuffer, pts.mtl)
+      drawPoly(pts.map(pt => {let newPt = project(pt); newPt.depth = 1/pt[2][0];  return newPt;}), canvasData, depthBuffer, pts.mtl, viewmodelBuffer, pts.viewmodel);
     }
     for (let i = 0; i < canvasData.height; i++) {
       for (let j = 0; j < canvasData.width; j++) {
@@ -489,6 +563,12 @@ setInterval(function() {
     lastTime = performance.now();
     drawText(ctx, "FPS: " + Math.round(1000/difference), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
 
+    ctx.fillStyle = "rgba(0, 0, 0, .5)";
+    //ctx.fillRect(canvas.width/2-1, canvas.height/2-1, 2, 2);
+    let bloomX = project([-Math.cos(Math.PI/2-bloom/2), 0, Math.sin(Math.PI/2-bloom/2)])[0]-canvas.width/2, 
+      bloomY = project([0, -Math.cos(Math.PI/2-bloom/2), Math.sin(Math.PI/2-bloom/2)])[1]-canvas.height/2;
+    ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
+    ctx.stroke();
     let hpColor = `rgb(${Math.min((100-hp)*255/50, 255)}, ${Math.min(hp*255/50, 255)}, 0)`;
     ctx.beginPath();
     ctx.fillStyle = "black";
@@ -522,14 +602,14 @@ setInterval(function() {
       if (hp <= 0) {
         pain += 0.01;
         ctx.globalAlpha = Math.min(pain, .8);
-        drawText(ctx, "You Died!", canvas.width/2, 50, 50, "black", "center", "Georgia");
+        drawText(ctx, "You Died!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
         ctx.globalAlpha = 1;
         if (pain >= 1) {gameState = "menu"; document.exitPointerLock();}
       }
       if (enemyHP <= 0) {
         pain -= 0.02;
         ctx.globalAlpha = -Math.max(pain, -.8);
-        drawText(ctx, "You Win!", canvas.width/2, 50, 50, "black", "center", "Georgia");
+        drawText(ctx, "You Win!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
         ctx.globalAlpha = 1;
         if (pain <= -1) {gameState = "menu"; document.exitPointerLock();}
       }
@@ -568,14 +648,19 @@ setInterval(function() {
     if (gameState === "menu") {
       let [width, height] = [getComputedStyle(canvas).width.replace("px", ""), getComputedStyle(canvas).height.replace("px", "")].map(Number);
       ctx.drawImage(thumbnail, width/2-(width+50)/2-(mouseX-50)/2, height/2 - (height+50)/2-(mouseY-50)/2, width+50, height+50);
-      ctx.drawImage(logo, canvas.width/2-logo.width/2, 30, logo.width, logo.height);
+      ctx.drawImage(logo, canvas.width/2-logo.width*.65, 30, logo.width, logo.height);
     }
+    let hitButton = false;
     for (let button of Button.buttons) {
       if (button.visible && button.props.targetScreen === gameState) {
         button.draw();
-        if (mouseDown && button.isHovering(mouseX, mouseY)) button.props.event();
+        if (mouseDown && button.isHovering(mouseX, mouseY)) {
+          button.props.event();
+          hitButton = true;
+        }
       }
     }
+    if (!hitButton) mouseDown = false;
   }
   
   if (gameState === "credits") {
@@ -585,9 +670,9 @@ setInterval(function() {
   }
   if (gameState === "instructions") {
     drawText(ctx, "Instructions", canvas.width/2, 30, 40, "black", "center", "Helvetica");
-    drawText(ctx, "WIP: currently WASD, space, and mouse to move", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
+    drawText(ctx, "WIP: currently WASD, space, and mouse to move and shoot", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
   }
-}, 20);
+}, 30);
 
 let bullets = [];
 function spawnShot(from, target=false) {
@@ -657,12 +742,14 @@ let play = new Button(40, 72.5, 15, 10, "rgb(150, 150, 150)", {value:"Begin Miss
     resetValues();
     gameState = "playing";
     resume.visible = true;
+    mouseDown = false;
   }
 });
 let resume = new Button(40, 60, 15, 10, "rgb(150, 150, 150)", {value:"Resume Mission", font:"Courier, monospace", size:20}, "menu", async function() {
   await canvas.requestPointerLock();
   if (document.pointerLockElement === canvas) {
     gameState = "playing";
+    mouseDown = false;
   }
 });
 resume.visible = false;
@@ -768,15 +855,15 @@ document.addEventListener("keyup", function(e) {
 	delete keys[e.key.toLowerCase()];
 });
 
-["bullet", "plane", "map", "enemy", "fire"].forEach(name => {
+["bullet", "plane", "map", "enemy", "fire", "bullethole", "gun"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
   });
 });
 
-let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null;
+let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, gunTemplate = null;
 Object.defineProperty(window, "isLoading", {
-  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate].some(template => template === null);},
+  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, gunTemplate].some(template => template === null);},
 });
 
 fetch("assets/plane.obj").then(res => res.text()).then(obj => {
@@ -785,6 +872,10 @@ fetch("assets/plane.obj").then(res => res.text()).then(obj => {
 });
 fetch("assets/bullet.obj").then(res => res.text()).then(obj => {
   bullet = processObj(obj);
+  if (!isLoading) resetValues();
+});
+fetch("assets/bullethole.obj").then(res => res.text()).then(obj => {
+  bulletHoleTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
 fetch("assets/map.obj").then(res => res.text()).then(obj => {
@@ -797,5 +888,9 @@ fetch("assets/enemy.obj").then(res => res.text()).then(obj => {
 });
 fetch("assets/fire.obj").then(res => res.text()).then(obj => {
   fireTemplate = processObj(obj);
+  if (!isLoading) resetValues();
+});
+fetch("assets/gun.obj").then(res => res.text()).then(obj => {
+  gunTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
