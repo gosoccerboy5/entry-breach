@@ -9,32 +9,18 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null;
 let bulletVel = null;
 let planeBaseVel = null;
 let enemyLeadsAim = null;
 let mapBoundaries = null;
 let gameActive = false;
 
-let player = null, enemy = null, map = null, fire = null, pistol = null, smg = null;
+let player = null, enemy = null, map = null, fire = null, pistol = null, smg = null, shotgun = null, sniper = null;
 
 function resetValues() {
   enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0;
-  weaponTraits = {
-    [pistol]: {
-      automatic: false,
-      defaultBloom: Math.PI/50,
-      normalPos: [-1.2, -.5, 2.5],
-      aimPos: [0, -.25, 2.5],
-    },
-    [smg]: {
-      automatic: false,
-      defaultBloom: Math.PI/70,
-      normalPos: [-2, -1, 3],
-      aimPos: [0, -.79, 2],
-    },
-  };
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0;
   planeBaseVel = 1.5;
   enemyLeadsAim = true;
   shapes = []; bullets = [];
@@ -43,9 +29,56 @@ function resetValues() {
   enemy = copyShape(enemyTemplate); 
   enemy.moveInDirection(150);
   fire = copyShape(fireTemplate);
-  //pistol = copyShape(pistolTemplate); pistol.viewmodel = true; shapes.push(pistol); pistol.turn([-Math.PI/2, 0, 0]);
-  smg = copyShape(smgTemplate); smg.viewmodel = true; shapes.push(smg); 
-  gun = smg;
+  pistol = copyShape(pistolTemplate); pistol.viewmodel = true; shapes.push(pistol); 
+  smg = copyShape(smgTemplate); smg.viewmodel = true; 
+  shotgun = copyShape(shotgunTemplate); shotgun.viewmodel = true; 
+  sniper = copyShape(sniperTemplate); sniper.viewmodel = true; 
+  gun = pistol;
+  weaponTraits = new Map();
+  weaponTraits.set(pistol, {
+    automatic: false,
+    runningBloom: 1.5,
+    defaultBloom: Math.PI/50,
+    normalPos: [-1.2, -.5, 2.5],
+    aimPos: [0, -.24, 2.5],
+    recoil: 1,
+    cooldown: 2,
+    slot: 1,
+  });
+  weaponTraits.set(smg, {
+    automatic: true,
+    runningBloom: .5,
+    defaultBloom: Math.PI/100,
+    normalPos: [-2, -1, 3],
+    aimPos: [0, -.79, 2],
+    recoil: 1.5,
+    cooldown: 2,
+    fovFactor: .7,
+    slot: 2,
+  });
+  weaponTraits.set(shotgun, {
+    automatic: false,
+    runningBloom: 0.2,
+    defaultBloom: 0*Math.PI/70,
+    normalPos: [-3, -1.5, 8],
+    aimPos: [0, -.9, 6],
+    recoil: 10,
+    cooldown: 30,
+    shots: 7,
+    spread: Math.PI/30,
+    slot: 3,
+  });
+  weaponTraits.set(sniper, {
+    automatic: false,
+    runningBloom: 1,
+    defaultBloom: Math.PI/200,
+    normalPos: [-2, -2, 7],
+    aimPos: [0, -1.67, 8],
+    recoil: 5,
+    cooldown: 30,
+    fovFactor: .2,
+    slot: 4,
+  });
   //enemy.update(Math.PI, "yaw");
   //shapes.push(enemy);
   mapBoundaries = [Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[0])))), 
@@ -424,6 +457,8 @@ setInterval(function() {
       if (keys["a"]) accelVec = plus(accelVec, [Math.cos(camAngle[0]), Math.sin(camAngle[0])]);
       if (keys["d"]) accelVec = plus(accelVec, [-Math.cos(camAngle[0]), -Math.sin(camAngle[0])]);
       let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"]||aimFactor > 0 ? .5 : 1))), .5);
+      let speed = distance(horizVel);
+      sway += speed;
       playerVel = [horizVel[0], playerVel[1], horizVel[1]];
       let physicsSteps = 2;
       for (let i = 0; i < physicsSteps; i++) {
@@ -460,24 +495,39 @@ setInterval(function() {
         } else {
           playerVel[1] -= gravity/physicsSteps;
         }
-        let idealBloom = distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5+weaponTraits[gun].defaultBloom * (aimFactor === 1 ? 0.5 : 1);
-        bloom += (idealBloom-bloom)*.7;
-        if (keys["q"]) aimFactor = Math.min(aimFactor+0.25, 1);
-        else aimFactor = Math.max(aimFactor-0.25, 0);
-        gun.move(minus(weaponTraits[gun].normalPos.map((n, idx) => n+(weaponTraits[gun].aimPos[idx]-n)*aimFactor), gun.offset));
-        FOV = FOV.map((n, idx) => trueFOV[idx]*(1-aimFactor/5));
 
-        if (mouseDown) {
-          mouseDown = false;
-          let shotAngle = camAngle.map(n=>n);
-          let bloomAngle = Math.random()*2*Math.PI, bloomWidth = (Math.random()-.5)*bloom;
-          shotAngle[1] += Math.sin(bloomAngle)*bloomWidth;
-          shotAngle[0] += Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1])));
-          let shotVec = vecFromAngle(shotAngle);
+        weaponTraits.forEach((traits, otherGun) => {
+          if (keys[traits.slot.toString()] && otherGun !== gun) {
+            shapes.splice(shapes.indexOf(gun), 1);
+            shapes.push(otherGun);
+            gun = otherGun;
+            shotCooldown = 20;
+            aimFactor = 0;
+          }
+        });
+
+        let idealBloom = Math.min(distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5 * weaponTraits.get(gun).runningBloom + weaponTraits.get(gun).defaultBloom * (aimFactor === 1 ? 0.5 : 1), Math.PI/6);
+        bloom += (idealBloom-bloom)*.7 + recoil*Math.PI/100;
+        if (keys["q"]) aimFactor = Math.min(aimFactor+0.2, 1);
+        else aimFactor = Math.max(aimFactor-0.25, 0);
+        gun.move(minus(weaponTraits.get(gun).normalPos.map((n, idx) => n+(weaponTraits.get(gun).aimPos[idx]-n)*aimFactor), gun.offset));
+        gun.move([0, 0, -recoil/3]);
+        gun.move([Math.sin(sway/5)*speed/15, Math.cos(sway/2.5)*-speed/20, 0])
+        gun.turn(minus([0, recoil/30, 0], gun.rotate));
+        FOV = FOV.map((n, idx) => trueFOV[idx]* (weaponTraits.get(gun).fovFactor === undefined ? (1-aimFactor/5) : 
+          1-(1-weaponTraits.get(gun).fovFactor)*aimFactor));
+        recoil = Math.max((recoil-1)*.7, 0);
+        
+        shotCooldown = Math.max(shotCooldown-1, 0);
+
+        function spawnShot(angle) {
+          let shotVec = vecFromAngle(angle);
           let hit = findRaycast(camPos, [map], shotVec);
           if (hit !== null) {
             if (hit.shape === map) {
               let bulletHole = copyShape(bulletHoleTemplate);
+              bulletHole.timer = 50;
+              bulletHoles.push(bulletHole);
               bulletHole.move(minus(hit.collision, bulletHole.offset));
               let cross = hit.poly.cross;
               bulletHole.turn([Math.atan2(cross[2], cross[0])+Math.PI/2, Math.PI/2-Math.atan2(cross[1], Math.sqrt(cross[0]**2+cross[2]**2)), 0]);
@@ -486,7 +536,34 @@ setInterval(function() {
             }
           }
         }
+        function deviate(angle, bloom) {
+          let bloomAngle = Math.random()*2*Math.PI, bloomWidth = (Math.random()-.5)*bloom;
+          return [angle[0] + Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1]))),
+            angle[1] + Math.sin(bloomAngle)*bloomWidth];
+        }
+        if (mouseDown && shotCooldown === 0) {
+          if (!weaponTraits.get(gun).automatic) mouseDown = false;
+          shotCooldown += weaponTraits.get(gun).cooldown;
+          recoil += weaponTraits.get(gun).recoil*(.75+Math.random()/2);
+          let shotAngle = deviate(camAngle, bloom);
+
+          camAngle = [camAngle[0] + (Math.random()-.5)/100, Math.min(Math.PI/2, camAngle[1]+recoil/80*(aimFactor === 1 ? .7 : 1))];
+          if (weaponTraits.get(gun).shots === undefined) spawnShot(shotAngle);
+          else {
+            for (let i = 0; i < weaponTraits.get(gun).shots; i++) {
+              let newShot = deviate(shotAngle, weaponTraits.get(gun).spread);
+              spawnShot(newShot);
+            }
+          }
+        }
       }
+    }
+    for (let bullethole of bulletHoles) {
+      if (bullethole.timer <= 0) {
+        bulletHoles.splice(bulletHoles.indexOf(bullethole), 1);
+        shapes.splice(shapes.indexOf(bullethole), 1);
+      }
+      bullethole.timer -= 1;
     }
 
     let yaw = matrix.from([[Math.cos(camAngle[0]), -Math.sin(camAngle[0]), 0], [Math.sin(camAngle[0]), Math.cos(camAngle[0]), 0], [0, 0, 1]]);
@@ -581,13 +658,17 @@ setInterval(function() {
 
     let difference = performance.now()-lastTime;
     lastTime = performance.now();
-    drawText(ctx, "FPS: " + Math.round(1000/difference), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
+    let fps = 1000/difference;
+    drawText(ctx, "FPS: " + Math.round(fps), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
+    if (fps < 7) canvasDivision += 0.5;
+    if (fps > 13) canvasDivision -= 0.5;
 
     ctx.fillStyle = "rgba(0, 0, 0, .5)";
     //ctx.fillRect(canvas.width/2-1, canvas.height/2-1, 2, 2);
-    ctx.strokeStyle = `rgba(0, 0, 0, ${1-aimFactor/2})`;
-    let bloomX = project([-Math.cos(Math.PI/2-bloom/2), 0, Math.sin(Math.PI/2-bloom/2)])[0]-canvas.width/2, 
-      bloomY = project([0, -Math.cos(Math.PI/2-bloom/2), Math.sin(Math.PI/2-bloom/2)])[1]-canvas.height/2;
+    ctx.strokeStyle = `rgba(0, 0, 0, ${1-aimFactor/1})`;
+    let totalBloom = bloom + (weaponTraits.get(gun).spread || 0);
+    let bloomX = project([-Math.cos(Math.PI/2-totalBloom/2), 0, Math.sin(Math.PI/2-totalBloom/2)])[0]-canvas.width/2, 
+      bloomY = project([0, -Math.cos(Math.PI/2-totalBloom/2), Math.sin(Math.PI/2-totalBloom/2)])[1]-canvas.height/2;
     ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
     ctx.stroke();
     let hpColor = `rgb(${Math.min((100-hp)*255/50, 255)}, ${Math.min(hp*255/50, 255)}, 0)`;
@@ -641,7 +722,10 @@ setInterval(function() {
     if (mouseDown) {
       (async function() {
         await canvas.requestPointerLock();
-        if (document.pointerLockElement === canvas) gameState = "playing";
+        if (document.pointerLockElement === canvas) {
+          gameState = "playing";
+          mouseDown = false;
+        }
       })();
     }
   }
@@ -694,6 +778,8 @@ setInterval(function() {
     drawText(ctx, "WIP: currently WASD, space, and mouse to move and shoot", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
   }
 }, 30);
+
+let bulletHoles = [];
 
 let bullets = [];
 function spawnShot(from, target=false) {
@@ -876,15 +962,15 @@ document.addEventListener("keyup", function(e) {
 	delete keys[e.key.toLowerCase()];
 });
 
-["bullet", "plane", "map", "enemy", "fire", "bullethole", "pistol", "smg"].forEach(name => {
+["bullet", "plane", "map", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
   });
 });
 
-let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, pistolTemplate = null, smgTemplate = null;
+let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, pistolTemplate = null, smgTemplate = null, shotgunTemplate = null, sniperTemplate = null;
 Object.defineProperty(window, "isLoading", {
-  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, pistolTemplate].some(template => template === null);},
+  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, pistolTemplate, shotgunTemplate, sniperTemplate].some(template => template === null);},
 });
 
 fetch("assets/plane.obj").then(res => res.text()).then(obj => {
@@ -917,5 +1003,13 @@ fetch("assets/pistol.obj").then(res => res.text()).then(obj => {
 });
 fetch("assets/smg.obj").then(res => res.text()).then(obj => {
   smgTemplate = processObj(obj);
+  if (!isLoading) resetValues();
+});
+fetch("assets/shotgun.obj").then(res => res.text()).then(obj => {
+  shotgunTemplate = processObj(obj);
+  if (!isLoading) resetValues();
+});
+fetch("assets/sniper.obj").then(res => res.text()).then(obj => {
+  sniperTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });

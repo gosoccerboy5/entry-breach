@@ -1,10 +1,10 @@
-# Blender 4.2.0 MTL File: 'untitled.blend'
-# www.blender.org
+# Blender MTL File: 'None'
+# Material Count: 1
 
 newmtl GunBlack
-Ns 250.000000
+Ns 249.999987
 Ka 1.000000 1.000000 1.000000
-Kd 0.2 0.2 0.2
+Kd 0.200000 0.200000 0.200000
 Ks 0.500000 0.500000 0.500000
 Ke 0.000000 0.000000 0.000000
 Ni 1.500000
