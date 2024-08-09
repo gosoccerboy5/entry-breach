@@ -9,18 +9,32 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, cameraDistance = null, bloom = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null;
 let bulletVel = null;
 let planeBaseVel = null;
 let enemyLeadsAim = null;
 let mapBoundaries = null;
 let gameActive = false;
 
-let player = null, enemy = null, map = null, fire = null, gun = null;
+let player = null, enemy = null, map = null, fire = null, pistol = null, smg = null;
 
 function resetValues() {
   enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10;
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0;
+  weaponTraits = {
+    [pistol]: {
+      automatic: false,
+      defaultBloom: Math.PI/50,
+      normalPos: [-1.2, -.5, 2.5],
+      aimPos: [0, -.25, 2.5],
+    },
+    [smg]: {
+      automatic: false,
+      defaultBloom: Math.PI/70,
+      normalPos: [-2, -1, 3],
+      aimPos: [0, -.79, 2],
+    },
+  };
   planeBaseVel = 1.5;
   enemyLeadsAim = true;
   shapes = []; bullets = [];
@@ -29,7 +43,9 @@ function resetValues() {
   enemy = copyShape(enemyTemplate); 
   enemy.moveInDirection(150);
   fire = copyShape(fireTemplate);
-  gun = copyShape(gunTemplate); gun.viewmodel = true; gun.move([-1.2, -.5, 2.5]); shapes.push(gun); gun.turn([-Math.PI/2, 0, 0]);
+  //pistol = copyShape(pistolTemplate); pistol.viewmodel = true; shapes.push(pistol); pistol.turn([-Math.PI/2, 0, 0]);
+  smg = copyShape(smgTemplate); smg.viewmodel = true; shapes.push(smg); 
+  gun = smg;
   //enemy.update(Math.PI, "yaw");
   //shapes.push(enemy);
   mapBoundaries = [Math.max(...map.polys.map(poly => Math.max(...poly.map(pt => pt[0])))), 
@@ -407,7 +423,7 @@ setInterval(function() {
       if (keys["s"]) accelVec = plus(accelVec, [Math.sin(camAngle[0]), -Math.cos(camAngle[0])]);
       if (keys["a"]) accelVec = plus(accelVec, [Math.cos(camAngle[0]), Math.sin(camAngle[0])]);
       if (keys["d"]) accelVec = plus(accelVec, [-Math.cos(camAngle[0]), -Math.sin(camAngle[0])]);
-      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"] ? .5 : 1))), .5);
+      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"]||aimFactor > 0 ? .5 : 1))), .5);
       playerVel = [horizVel[0], playerVel[1], horizVel[1]];
       let physicsSteps = 2;
       for (let i = 0; i < physicsSteps; i++) {
@@ -444,8 +460,12 @@ setInterval(function() {
         } else {
           playerVel[1] -= gravity/physicsSteps;
         }
-        let idealBloom = distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5+Math.PI/50;
+        let idealBloom = distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5+weaponTraits[gun].defaultBloom * (aimFactor === 1 ? 0.5 : 1);
         bloom += (idealBloom-bloom)*.7;
+        if (keys["q"]) aimFactor = Math.min(aimFactor+0.25, 1);
+        else aimFactor = Math.max(aimFactor-0.25, 0);
+        gun.move(minus(weaponTraits[gun].normalPos.map((n, idx) => n+(weaponTraits[gun].aimPos[idx]-n)*aimFactor), gun.offset));
+        FOV = FOV.map((n, idx) => trueFOV[idx]*(1-aimFactor/5));
 
         if (mouseDown) {
           mouseDown = false;
@@ -565,6 +585,7 @@ setInterval(function() {
 
     ctx.fillStyle = "rgba(0, 0, 0, .5)";
     //ctx.fillRect(canvas.width/2-1, canvas.height/2-1, 2, 2);
+    ctx.strokeStyle = `rgba(0, 0, 0, ${1-aimFactor/2})`;
     let bloomX = project([-Math.cos(Math.PI/2-bloom/2), 0, Math.sin(Math.PI/2-bloom/2)])[0]-canvas.width/2, 
       bloomY = project([0, -Math.cos(Math.PI/2-bloom/2), Math.sin(Math.PI/2-bloom/2)])[1]-canvas.height/2;
     ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
@@ -855,15 +876,15 @@ document.addEventListener("keyup", function(e) {
 	delete keys[e.key.toLowerCase()];
 });
 
-["bullet", "plane", "map", "enemy", "fire", "bullethole", "gun"].forEach(name => {
+["bullet", "plane", "map", "enemy", "fire", "bullethole", "pistol", "smg"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
   });
 });
 
-let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, gunTemplate = null;
+let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, pistolTemplate = null, smgTemplate = null;
 Object.defineProperty(window, "isLoading", {
-  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, gunTemplate].some(template => template === null);},
+  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, pistolTemplate].some(template => template === null);},
 });
 
 fetch("assets/plane.obj").then(res => res.text()).then(obj => {
@@ -890,7 +911,11 @@ fetch("assets/fire.obj").then(res => res.text()).then(obj => {
   fireTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
-fetch("assets/gun.obj").then(res => res.text()).then(obj => {
-  gunTemplate = processObj(obj);
+fetch("assets/pistol.obj").then(res => res.text()).then(obj => {
+  pistolTemplate = processObj(obj);
+  if (!isLoading) resetValues();
+});
+fetch("assets/smg.obj").then(res => res.text()).then(obj => {
+  smgTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
