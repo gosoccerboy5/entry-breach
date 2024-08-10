@@ -9,7 +9,7 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null; reloadTime = null;
 let bulletVel = null;
 let planeBaseVel = null;
 let enemyLeadsAim = null;
@@ -20,7 +20,7 @@ let player = null, enemy = null, map = null, fire = null, pistol = null, smg = n
 
 function resetValues() {
   enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.5; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0;
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0;
   planeBaseVel = 1.5;
   enemyLeadsAim = true;
   shapes = []; bullets = [];
@@ -36,6 +36,7 @@ function resetValues() {
   gun = pistol;
   weaponTraits = new Map();
   weaponTraits.set(pistol, {
+    name: "Pistol",
     automatic: false,
     runningBloom: 1.5,
     defaultBloom: Math.PI/50,
@@ -44,40 +45,56 @@ function resetValues() {
     recoil: 1,
     cooldown: 2,
     slot: 1,
+    ammo: 15,
+    totalAmmo: 15,
+    reloadTime: 40,
   });
   weaponTraits.set(smg, {
+    name: "SMG",
     automatic: true,
     runningBloom: .5,
-    defaultBloom: Math.PI/100,
+    defaultBloom: Math.PI/70,
     normalPos: [-2, -1, 3],
     aimPos: [0, -.79, 2],
-    recoil: 1.5,
+    recoil: 1.2,
     cooldown: 2,
     fovFactor: .7,
     slot: 2,
+    ammo: 30,
+    totalAmmo: 30,
+    reloadTime: 40,
   });
   weaponTraits.set(shotgun, {
+    name: "Shotgun",
     automatic: false,
     runningBloom: 0.2,
     defaultBloom: 0*Math.PI/70,
     normalPos: [-3, -1.5, 8],
     aimPos: [0, -.9, 6],
     recoil: 10,
-    cooldown: 30,
+    cooldown: 15,
     shots: 7,
     spread: Math.PI/30,
     slot: 3,
+    ammo: 8,
+    totalAmmo: 8,
+    reloadTime: 20,
+    reloadPerShot: true,
   });
   weaponTraits.set(sniper, {
+    name: "Sniper",
     automatic: false,
-    runningBloom: 1,
+    runningBloom: 2,
     defaultBloom: Math.PI/200,
     normalPos: [-2, -2, 7],
-    aimPos: [0, -1.67, 8],
+    aimPos: [0, -1.57, 7],
     recoil: 5,
     cooldown: 30,
     fovFactor: .2,
     slot: 4,
+    ammo: 1,
+    totalAmmo: 1,
+    reloadTime: 60,
   });
   //enemy.update(Math.PI, "yaw");
   //shapes.push(enemy);
@@ -347,7 +364,8 @@ function ptHitsTri(pt, radius, tri, data) {
   let expectedOuterDistance = distance(firstpoint, pt) * Math.sin(angleBetween(pt, firstpoint, secondpoint));
   let distanceAlong = distance(firstpoint, pt) * Math.cos(angleBetween(pt, firstpoint, secondpoint))
   if (expectedOuterDistance <= radius) {
-    //return data["vec"] ? times(minus(data["sphereCenter"], plus(firstpoint, times(minus(firstpoint, secondpoint), distanceAlong))), step) : true;
+    //console.log(data["sphereCenter"], plus(firstpoint, times(minus(firstpoint, secondpoint), -distanceAlong)));
+    return data["vec"] ? times(minus(data["sphereCenter"], plus(firstpoint, times(unit(minus(secondpoint, firstpoint)), distanceAlong))), step) : true;
     return data["vec"] ? times(data["poly"].cross, distInDir(data["poly"].cross, center(data["poly"]), data["sphereCenter"]) > 0 ? step : -step) : true;
   }
   return false;
@@ -426,26 +444,7 @@ setInterval(function() {
     canvas.height = window.innerHeight/canvasDivision;
     let cameraSpeed = 1;
     camFollow = player;
-    if (camFollow === null) {
-      if (keys["w"]) {
-        camPos[2] += Math.cos(camAngle[0]) * cameraSpeed * Math.cos(camAngle[1]);
-        camPos[0] += Math.sin(-camAngle[0]) * cameraSpeed * Math.cos(camAngle[1]);
-        camPos[1] += Math.sin(camAngle[1]) * cameraSpeed;
-      }
-      if (keys["s"]) {
-        camPos[2] -= Math.cos(camAngle[0]) * cameraSpeed * Math.cos(camAngle[1])
-        camPos[0] -= Math.sin(-camAngle[0]) * cameraSpeed * Math.cos(camAngle[1]);
-        camPos[1] -= Math.sin(camAngle[1]) * cameraSpeed;
-      }
-      if (keys["a"]) {
-        camPos[2] -= Math.sin(camAngle[0]) * cameraSpeed;
-        camPos[0] -= Math.cos(-camAngle[0]) * cameraSpeed;
-      }
-      if (keys["d"]) {
-        camPos[2] += Math.sin(camAngle[0]) * cameraSpeed;
-        camPos[0] += Math.cos(-camAngle[0]) * cameraSpeed;
-      }
-    } else {
+    if (camFollow === null) {} else {
       camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
       camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
@@ -456,7 +455,7 @@ setInterval(function() {
       if (keys["s"]) accelVec = plus(accelVec, [Math.sin(camAngle[0]), -Math.cos(camAngle[0])]);
       if (keys["a"]) accelVec = plus(accelVec, [Math.cos(camAngle[0]), Math.sin(camAngle[0])]);
       if (keys["d"]) accelVec = plus(accelVec, [-Math.cos(camAngle[0]), -Math.sin(camAngle[0])]);
-      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"]||aimFactor > 0 ? .5 : 1))), .5);
+      let horizVel = times(plus([playerVel[0], playerVel[2]], times(unit(accelVec), accelFactor*(keys["shift"]||aimFactor > 0 ? .3 : 1))), .5);
       let speed = distance(horizVel);
       sway += speed;
       playerVel = [horizVel[0], playerVel[1], horizVel[1]];
@@ -474,20 +473,23 @@ setInterval(function() {
         }
         player.move([0, playerVel[1]/physicsSteps, 0]);
         let hitGround = false;
-        for (let poly of map.polys) {
-          let collides = sphereHitsPoly(player.offset, playerRadius, poly)
-          if (collides !== false) {
-            if (playerVel[1] < 0) {
-              if (-playerVel[1] > 5) {
-                hp -= -playerVel[1]*4;
-                pain += .3;
+        if (playerVel[1] !== 0) {
+          for (let poly of map.polys) {
+            let collides = sphereHitsPoly(player.offset, playerRadius, poly)
+            if (collides !== false) {
+              if (playerVel[1] < 0) {
+                if (-playerVel[1] > 5) {
+                  hp -= -playerVel[1]*4;
+                  pain += .3;
+                }
+                hitGround = true;
               }
-              hitGround = true;
+              while (sphereHitsPoly(player.offset, playerRadius, poly)) {
+                player.move([0, playerVel[1] <= 0 ? step : -step, 0]);
+              }
+              playerVel[1] = 0;
+              break;
             }
-            while (sphereHitsPoly(player.offset, playerRadius, poly)) {
-              player.move([0, playerVel[1] <= 0 ? step : -step, 0]);
-            }
-            playerVel[1] = 0;
           }
         }
         if (hitGround && keys[" "]) {
@@ -496,8 +498,14 @@ setInterval(function() {
           playerVel[1] -= gravity/physicsSteps;
         }
 
+        if (keys["r"] && weaponTraits.get(gun).ammo !== weaponTraits.get(gun).totalAmmo && !reloading) {
+          reloading = true;
+          reloadTime = weaponTraits.get(gun).reloadPerShot ? 
+            weaponTraits.get(gun).reloadTime * (weaponTraits.get(gun).totalAmmo-weaponTraits.get(gun).ammo) : weaponTraits.get(gun).reloadTime;
+        }
+
         weaponTraits.forEach((traits, otherGun) => {
-          if (keys[traits.slot.toString()] && otherGun !== gun) {
+          if (!reloading && keys[traits.slot.toString()] && otherGun !== gun) {
             shapes.splice(shapes.indexOf(gun), 1);
             shapes.push(otherGun);
             gun = otherGun;
@@ -507,22 +515,32 @@ setInterval(function() {
         });
 
         let idealBloom = Math.min(distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*1.2, playerVel[2]])/5 * weaponTraits.get(gun).runningBloom + weaponTraits.get(gun).defaultBloom * (aimFactor === 1 ? 0.5 : 1), Math.PI/6);
-        bloom += (idealBloom-bloom)*.7 + recoil*Math.PI/100;
-        if (keys["q"]) aimFactor = Math.min(aimFactor+0.2, 1);
+        bloom += (idealBloom-bloom)*.7 + recoil*Math.PI/150;
+        if (!reloading && (keys["q"] || rightMouseDown)) aimFactor = Math.min(aimFactor+0.2, 1);
         else aimFactor = Math.max(aimFactor-0.25, 0);
         gun.move(minus(weaponTraits.get(gun).normalPos.map((n, idx) => n+(weaponTraits.get(gun).aimPos[idx]-n)*aimFactor), gun.offset));
         gun.move([0, 0, -recoil/3]);
-        gun.move([Math.sin(sway/5)*speed/15, Math.cos(sway/2.5)*-speed/20, 0])
+        gun.move([Math.sin(sway/5)*speed/10, Math.cos(sway/2.5)*-speed/15, 0])
         gun.turn(minus([0, recoil/30, 0], gun.rotate));
+        if (reloading) {
+          gun.move([0, 15*weaponTraits.get(gun).normalPos[1]*Math.sin(reloadTime/(weaponTraits.get(gun).reloadPerShot ? 
+          weaponTraits.get(gun).reloadTime * (weaponTraits.get(gun).totalAmmo-weaponTraits.get(gun).ammo) : weaponTraits.get(gun).reloadTime)*Math.PI), 0]);
+          reloadTime -= 1;
+          if (reloadTime <= 0) {
+            weaponTraits.get(gun).ammo = weaponTraits.get(gun).totalAmmo;
+            reloading = false;
+          }
+        }
         FOV = FOV.map((n, idx) => trueFOV[idx]* (weaponTraits.get(gun).fovFactor === undefined ? (1-aimFactor/5) : 
           1-(1-weaponTraits.get(gun).fovFactor)*aimFactor));
         recoil = Math.max((recoil-1)*.7, 0);
         
         shotCooldown = Math.max(shotCooldown-1, 0);
 
-        function spawnShot(angle) {
+        function spawnShot(startPos, angle, laserStartPos) {
           let shotVec = vecFromAngle(angle);
-          let hit = findRaycast(camPos, [map], shotVec);
+          let hit = findRaycast(startPos, [map], shotVec);
+          laserBeam(laserStartPos, hit ? hit.collision : plus(startPos, times(shotVec, 200)));
           if (hit !== null) {
             if (hit.shape === map) {
               let bulletHole = copyShape(bulletHoleTemplate);
@@ -531,7 +549,7 @@ setInterval(function() {
               bulletHole.move(minus(hit.collision, bulletHole.offset));
               let cross = hit.poly.cross;
               bulletHole.turn([Math.atan2(cross[2], cross[0])+Math.PI/2, Math.PI/2-Math.atan2(cross[1], Math.sqrt(cross[0]**2+cross[2]**2)), 0]);
-              bulletHole.move(times(cross, distInDir(cross, camPos, center(hit.poly)) < 0 ? .1 : -.1));
+              bulletHole.move(times(cross, distInDir(cross, camPos, center(hit.poly)) < 0 ? .16 : -.16));
               shapes.push(bulletHole);
             }
           }
@@ -541,29 +559,44 @@ setInterval(function() {
           return [angle[0] + Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1]))),
             angle[1] + Math.sin(bloomAngle)*bloomWidth];
         }
-        if (mouseDown && shotCooldown === 0) {
+        if (mouseDown && shotCooldown === 0 && weaponTraits.get(gun).ammo > 0 && !reloading) {
           if (!weaponTraits.get(gun).automatic) mouseDown = false;
           shotCooldown += weaponTraits.get(gun).cooldown;
           recoil += weaponTraits.get(gun).recoil*(.75+Math.random()/2);
           let shotAngle = deviate(camAngle, bloom);
-
+          let barrelTip = [gun.offset[0], -gun.offset[1], Math.max(...gun.polys.map(poly => Math.max(...poly.map(pt => pt[2]))))];
+          let barrelDist = 1;//distance(barrelTip);
+          let barrelAngle = [Math.atan2(barrelTip[2], barrelTip[0])-Math.PI/2, Math.atan2(barrelTip[2], barrelTip[1])-Math.PI/2];
+          let realGunPos = plus(camPos, times(vecFromAngle(camAngle.map((n, idx) => n+barrelAngle[idx])), barrelDist));
           camAngle = [camAngle[0] + (Math.random()-.5)/100, Math.min(Math.PI/2, camAngle[1]+recoil/80*(aimFactor === 1 ? .7 : 1))];
-          if (weaponTraits.get(gun).shots === undefined) spawnShot(shotAngle);
+          weaponTraits.get(gun).ammo -= 1;
+          if (weaponTraits.get(gun).shots === undefined) spawnShot(camPos, shotAngle, realGunPos);
           else {
             for (let i = 0; i < weaponTraits.get(gun).shots; i++) {
               let newShot = deviate(shotAngle, weaponTraits.get(gun).spread);
-              spawnShot(newShot);
+              spawnShot(camPos, newShot, realGunPos);
             }
           }
         }
       }
     }
-    for (let bullethole of bulletHoles) {
-      if (bullethole.timer <= 0) {
-        bulletHoles.splice(bulletHoles.indexOf(bullethole), 1);
-        shapes.splice(shapes.indexOf(bullethole), 1);
+    for (let i = 0; i < bulletHoles.length; i++) {
+      let bulletHole = bulletHoles[i];
+      if (bulletHole.timer <= 0) {
+        bulletHoles.splice(i, 1);
+        shapes.splice(shapes.indexOf(bulletHole), 1);
+        i -= 1;
       }
-      bullethole.timer -= 1;
+      bulletHole.timer -= 1;
+    }
+    for (let i = 0; i < laserBeams.length; i++) {
+      let laserBeam = laserBeams[i];
+      if (laserBeam.timer <= 0) {
+        laserBeams.splice(i, 1);
+        shapes.splice(shapes.indexOf(laserBeam), 1);
+        i -= 1;
+      }
+      laserBeam.timer -= 1;
     }
 
     let yaw = matrix.from([[Math.cos(camAngle[0]), -Math.sin(camAngle[0]), 0], [Math.sin(camAngle[0]), Math.cos(camAngle[0]), 0], [0, 0, 1]]);
@@ -660,8 +693,6 @@ setInterval(function() {
     lastTime = performance.now();
     let fps = 1000/difference;
     drawText(ctx, "FPS: " + Math.round(fps), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
-    if (fps < 7) canvasDivision += 0.5;
-    if (fps > 13) canvasDivision -= 0.5;
 
     ctx.fillStyle = "rgba(0, 0, 0, .5)";
     //ctx.fillRect(canvas.width/2-1, canvas.height/2-1, 2, 2);
@@ -685,7 +716,18 @@ setInterval(function() {
     pain = gameActive ? Math.min(pain, .4) : pain;
     ctx.fillStyle = pain >= 0 ? `rgba(255, 0, 0, ${pain})` : `rgba(0, 255, 0, ${-pain})`;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+		ctx.beginPath();
+		ctx.roundRect(0, canvas.height-250/canvasDivision, 300/canvasDivision, 170/canvasDivision, 5);
+		ctx.fill();
+		ctx.textAlign = "center";
+    drawText(ctx, weaponTraits.get(gun).name, 150/canvasDivision, canvas.height-200/canvasDivision, 50/canvasDivision, "white");
+    drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
+		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
+    if (fps < 9) canvasDivision += 0.25;
+    if (fps > 13) canvasDivision -= 0.25;
+    
 
     if (gameActive) {
       if (hp <= 0) {
@@ -775,7 +817,7 @@ setInterval(function() {
   }
   if (gameState === "instructions") {
     drawText(ctx, "Instructions", canvas.width/2, 30, 40, "black", "center", "Helvetica");
-    drawText(ctx, "WIP: currently WASD, space, and mouse to move and shoot", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
+    drawText(ctx, "WIP: currently WASD, space, mouse to move and shoot, keys 1-4 to select gun, q/RMB to aim, and r to reload", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
   }
 }, 30);
 
@@ -801,10 +843,25 @@ function spawnShot(from, target=false) {
   shot.localFrame.roll = unit(shot.localFrame.roll.map(n => n+(Math.random()-0.5)*0.05));
 }
 
+let laserBeams = [];
+function laserBeam(pos1, pos2) {
+  let width = .03;
+  let laser = new Shape([[[pos1[0], pos1[1]+width, pos1[2]], [pos1[0], pos1[1]-width, pos1[2]], [pos2[0], pos2[1]-width, pos2[2]], [pos2[0], pos2[1]+width, pos2[2]]]]);
+  for (let poly of laser.polys) {
+    poly.mtl = "Bullet";
+  }
+  laser.updateCrossProducts();
+  laser.timer = 1;
+  laserBeams.push(laser);
+  shapes.push(laser);
+}
+
+
 canvas.addEventListener("mousemove", function(e) {
   if (gameState === "playing") {
-    camAngle[0] += e.movementX/200;
-    camAngle[1] = Math.max(Math.min(camAngle[1]-e.movementY/200, Math.PI/2), -Math.PI/2);
+    let factor = FOV[0] / trueFOV[0];
+    camAngle[0] += e.movementX/200 * factor;
+    camAngle[1] = Math.max(Math.min(camAngle[1]-e.movementY/200*factor, Math.PI/2), -Math.PI/2);
   } else {
     let bd = canvas.getBoundingClientRect();
     let mousePos = [(e.clientX - bd.left)*canvas.width/Number(getComputedStyle(canvas).width.replace("px", "")), (e.clientY - bd.top)*canvas.height/Number(getComputedStyle(canvas).height.replace("px", ""))];
@@ -812,12 +869,18 @@ canvas.addEventListener("mousemove", function(e) {
   }
 });
 canvas.addEventListener("mousedown", function(e) {
-  if (e.buttons !== 1) {e.preventDefault(); e.stopPropagation();return;}
+  if (e.buttons !== 1) {
+    e.preventDefault(); e.stopPropagation();
+    if (e.buttons === 2) {
+      rightMouseDown = true;
+    }return;
+  }
   mouseDown = true;
 });
 canvas.addEventListener("contextmenu", e => e.preventDefault());
-document.addEventListener("mouseup", function() {
-  mouseDown = false;
+document.addEventListener("mouseup", function(e) {
+  if (e.button === 0) mouseDown = false;
+  if (e.button === 2) rightMouseDown = false;
 });
 
 class Button {
@@ -953,7 +1016,7 @@ function processMtl(text) {
 
 
 let keys = {};
-let mouseDown = false;
+let mouseDown = false, rightMouseDown = false;
 let mouseX = 0, mouseY = 0;
 document.addEventListener("keydown", function(e) {
 	keys[e.key.toLowerCase()] = true;
@@ -962,7 +1025,7 @@ document.addEventListener("keyup", function(e) {
 	delete keys[e.key.toLowerCase()];
 });
 
-["bullet", "plane", "map", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
+["bullet", "plane", "desertmap", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
   });
@@ -985,7 +1048,7 @@ fetch("assets/bullethole.obj").then(res => res.text()).then(obj => {
   bulletHoleTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
-fetch("assets/map.obj").then(res => res.text()).then(obj => {
+fetch("assets/desertmap.obj").then(res => res.text()).then(obj => {
   mapTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
