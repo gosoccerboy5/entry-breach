@@ -9,10 +9,8 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null, enemyDamage = null;
 let bulletVel = null;
-let planeBaseVel = null;
-let enemyLeadsAim = null;
 let mapBoundaries = null;
 let gameActive = false;
 
@@ -20,11 +18,10 @@ let player = null, enemy = null, map = null, fire = null, pistol = null, smg = n
 
 function resetValues() {
   enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/50; enemyShotChance = .1;
-  planeBaseVel = 1.5; hitShot = {state: 1, frames: 0};
-  enemyLeadsAim = true;
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/25; enemyShotChance = .1; enemyDamage = 10;
+  hitShot = {state: 1, frames: 0};
   shapes = []; bullets = []; enemies = []; lasers = [];
-  player = copyShape(planeTemplate); player.move([0, 2, 4]); if (cameraDistance > 0) shapes.push(player); 
+  player = copyShape(playerTemplate); player.move([0, 2, 4]); if (cameraDistance > 0) shapes.push(player); 
   map = copyShape(mapTemplate); shapes.push(map);
   for (let i = 0; i < map.polys.length; i++) {
     let poly = map.polys[i];
@@ -94,7 +91,7 @@ function resetValues() {
   weaponTraits.set(sniper, {
     name: "Sniper",
     automatic: false,
-    runningBloom: 2,
+    runningBloom: 3,
     defaultBloom: Math.PI/200,
     normalPos: [-2, -2, 7],
     aimPos: [0, -1.57, 6],
@@ -342,6 +339,11 @@ function distance(pt1, pt2) {
 function vecFromAngle(angle) {
   return [-Math.sin(angle[0])*Math.cos(angle[1]), Math.sin(angle[1]), Math.cos(angle[0])*Math.cos(angle[1])];
 }
+function deviate(angle, bloom) {
+  let bloomAngle = Math.random()*2*Math.PI, bloomWidth = (Math.random()-.5)*bloom;
+  return [angle[0] + Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1]))),
+    angle[1] + Math.sin(bloomAngle)*bloomWidth];
+}
 function leadAim(initPos, targetPos, speed, targetVel) {
   let collisionPos = targetPos, time = null;
   for (let i = 0; i < 5; i++) {
@@ -467,7 +469,7 @@ setInterval(function() {
     canvas.height = window.innerHeight/canvasDivision;
     let cameraSpeed = 1;
     camFollow = player;
-    if (camFollow === null) {} else {
+    if (camFollow === null) {} else if (gameActive) {
       camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
       camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
@@ -577,16 +579,18 @@ setInterval(function() {
               bulletHole.move(times(cross, distInDir(cross, startPos, center(hit.poly)) < 0 ? .16 : -.16));
               shapes.push(bulletHole);
             } else if (enemies.includes(hit.shape)) {
-              if (damage !== undefined) hit.shape.health -= damage;
+              if (damage !== undefined) {
+                if (hit.poly.mtl === "Head") damage *= 2;
+                hit.shape.health -= damage;
+              }
               hitShot = (hit.shape.health === undefined || hit.shape.health) > 0 ? {state: 1, frames: 5} : {state: 2, frames: 10};
+              if (hit.poly.mtl === "Head") hitShot.headshot = true; else hitShot.headshot = false;
+            } else if (hit.shape === player) {
+              if (damage !== undefined) {hp -= damage; pain += .2;}
             }
           }
         }
-        function deviate(angle, bloom) {
-          let bloomAngle = Math.random()*2*Math.PI, bloomWidth = (Math.random()-.5)*bloom;
-          return [angle[0] + Math.cos(bloomAngle)*bloomWidth/(Math.abs(Math.cos(camAngle[1]))),
-            angle[1] + Math.sin(bloomAngle)*bloomWidth];
-        }
+        
         if (mouseDown && shotCooldown === 0 && weaponTraits.get(gun).ammo > 0 && !reloading) {
           if (!weaponTraits.get(gun).automatic) mouseDown = false;
           shotCooldown += weaponTraits.get(gun).cooldown;
@@ -608,19 +612,21 @@ setInterval(function() {
         }
       }
     }
-    for (let i = 0; i < enemies.length; i++) {
-      let enemy = enemies[i];
-      if (enemy.health <= 0) {
-        enemies.splice(i, 1);
-        if (shapes.includes(enemy)) shapes.splice(shapes.indexOf(enemy), 1);
-        i--;
-        continue;
-      }
-      let angle = (Math.atan2(camPos[2]-enemy.offset[2], camPos[0]-enemy.offset[0])-Math.PI/2) - enemy.rotate[0];
-      angle = Math.min(Math.abs(angle), Math.abs(Math.PI*2-angle)) === Math.abs(angle) ? angle : angle-Math.PI*2;
-      enemy.turn([angle * .2, 0, 0]);
-      if (Math.random() < enemyShotChance && lineOfSight(enemy.offset, [map], camPos)) {
-        spawnShot(enemy.offset, deviate([enemy.rotate[0], -Math.atan2(distance([camPos[0], camPos[2]], [enemy.offset[0], enemy.offset[2]]), camPos[1]-enemy.offset[1])+Math.PI/2, enemy.rotate[1]], enemyBloom), enemy.offset)
+    if (gameActive) {
+        for (let i = 0; i < enemies.length; i++) {
+        let enemy = enemies[i];
+        if (enemy.health <= 0) {
+          enemies.splice(i, 1);
+          if (shapes.includes(enemy)) shapes.splice(shapes.indexOf(enemy), 1);
+          i--;
+          continue;
+        }
+        let angle = (Math.atan2(camPos[2]-enemy.offset[2], camPos[0]-enemy.offset[0])-Math.PI/2) - enemy.rotate[0];
+        angle = Math.min(Math.abs(angle), Math.abs(Math.PI*2-angle)) === Math.abs(angle) ? angle : angle-Math.PI*2;
+        enemy.turn([angle * .1, 0, 0]);
+        if (Math.random() < enemyShotChance && lineOfSight(enemy.offset, [map], camPos)) {
+          spawnShot(enemy.offset, deviate([enemy.rotate[0], -Math.atan2(distance([camPos[0], camPos[2]], [enemy.offset[0], enemy.offset[2]]), camPos[1]-enemy.offset[1])+Math.PI/2, enemy.rotate[1]], enemyBloom), enemy.offset, enemyDamage, [map, player]);
+        }
       }
     }
     for (let i = 0; i < bulletHoles.length; i++) {
@@ -768,9 +774,10 @@ setInterval(function() {
     drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
 
     if (hitShot.frames > 0) {
-      if (hitShot.state === 1) ctx.drawImage(hitMarker, canvas.width/2+100/canvasDivision, canvas.height/2-25/canvasDivision, 75/canvasDivision, 75/canvasDivision);
-      else ctx.drawImage(skullIcon, canvas.width/2+100/canvasDivision, canvas.height/2-25/canvasDivision, 75/canvasDivision, 75/canvasDivision);
-    }
+      if (hitShot.state === 1) ctx.drawImage(hitMarker, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
+      else ctx.drawImage(skullIcon, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
+      if (hitShot.headshot) ctx.drawImage(headshot, canvas.width/2+225/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
+    } else hitShot.headshot = false;
     hitShot.frames -= 1;
 		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
@@ -780,24 +787,28 @@ setInterval(function() {
 
     if (gameActive) {
       if (hp <= 0) {
-        fire = copyShape(fireTemplate);
-        fire.move(minus(player.offset, fire.offset))
-        shapes.push(fire); gameActive = false; resume.visible = false;
+        gameActive = false; resume.visible = false;
         pain = .4;
       }
-      if (enemyHP <= 0) {
-        fire = copyShape(fireTemplate);
-        fire.move(minus(enemy.offset, fire.offset));
-        shapes.push(fire); gameActive = false; resume.visible = false;
+      if (enemies.length === 0) {
+        gameActive = false; resume.visible = false;
         pain = 0;
       }
     } else {
       if (hp <= 0) {
         pain += 0.01;
+        accelFactor = 0;
         ctx.globalAlpha = Math.min(pain, .8);
         drawText(ctx, "You Died!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
         ctx.globalAlpha = 1;
         if (pain >= 1) {gameState = "menu"; document.exitPointerLock();}
+      }
+      if (enemies.length <= 0) {
+        pain -= 0.02;
+        ctx.globalAlpha = -Math.max(pain, -.8);
+        drawText(ctx, "You Win!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
+        ctx.globalAlpha = 1;
+        if (pain <= -1) {gameState = "menu"; document.exitPointerLock();}
       }
     }    
   }
@@ -1008,6 +1019,8 @@ let hitMarker = new Image();
 hitMarker.src = "assets/crosshair.svg";
 let skullIcon = new Image();
 skullIcon.src = "assets/skull_icon.png";
+let headshot = new Image();
+headshot.src = "assets/headshot.png";
 
 function drawText(ctx, text, x, y, size=10, color="black", align="center", font="Arial") {
   ctx.fillStyle = color;
@@ -1086,19 +1099,19 @@ document.addEventListener("keyup", function(e) {
 	delete keys[deShift(e.key.toLowerCase())];
 });
 
-["bullet", "plane", "desertmap", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
+["bullet", "player", "desertmap", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
   });
 });
 
-let planeTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, pistolTemplate = null, smgTemplate = null, shotgunTemplate = null, sniperTemplate = null;
+let playerTemplate = null, mapTemplate = null, bullet = null, enemyTemplate = null, fireTemplate = null, bulletHoleTemplate = null, pistolTemplate = null, smgTemplate = null, shotgunTemplate = null, sniperTemplate = null;
 Object.defineProperty(window, "isLoading", {
-  get() {return [planeTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, pistolTemplate, shotgunTemplate, sniperTemplate].some(template => template === null);},
+  get() {return [playerTemplate, mapTemplate, bullet, enemyTemplate, fireTemplate, bulletHoleTemplate, pistolTemplate, shotgunTemplate, sniperTemplate].some(template => template === null);},
 });
 
-fetch("assets/plane.obj").then(res => res.text()).then(obj => {
-  planeTemplate = processObj(obj);
+fetch("assets/player.obj").then(res => res.text()).then(obj => {
+  playerTemplate = processObj(obj);
   if (!isLoading) resetValues();
 });
 fetch("assets/bullet.obj").then(res => res.text()).then(obj => {
