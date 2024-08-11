@@ -725,8 +725,8 @@ setInterval(function() {
     drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
 		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
-    if (fps < 9) canvasDivision += 0.25;
-    if (fps > 13) canvasDivision -= 0.25;
+    if (fps < 11) canvasDivision += 0.25;
+    if (fps > 15) canvasDivision -= 0.25;
     
 
     if (gameActive) {
@@ -869,9 +869,10 @@ canvas.addEventListener("mousemove", function(e) {
   }
 });
 canvas.addEventListener("mousedown", function(e) {
-  if (e.buttons !== 1) {
+  console.log(e)
+  if (e.button !== 0) {
     e.preventDefault(); e.stopPropagation();
-    if (e.buttons === 2) {
+    if (e.button === 2) {
       rightMouseDown = true;
     }return;
   }
