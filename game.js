@@ -9,7 +9,7 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null; reloadTime = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null;
 let bulletVel = null;
 let planeBaseVel = null;
 let enemyLeadsAim = null;
@@ -20,14 +20,21 @@ let player = null, enemy = null, map = null, fire = null, pistol = null, smg = n
 
 function resetValues() {
   enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0;
-  planeBaseVel = 1.5;
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/50; enemyShotChance = .1;
+  planeBaseVel = 1.5; hitShot = {state: 1, frames: 0};
   enemyLeadsAim = true;
-  shapes = []; bullets = [];
+  shapes = []; bullets = []; enemies = []; lasers = [];
   player = copyShape(planeTemplate); player.move([0, 2, 4]); if (cameraDistance > 0) shapes.push(player); 
   map = copyShape(mapTemplate); shapes.push(map);
-  enemy = copyShape(enemyTemplate); 
-  enemy.moveInDirection(150);
+  for (let i = 0; i < map.polys.length; i++) {
+    let poly = map.polys[i];
+    if (poly.mtl === "EnemySpawn") {
+      if (Math.random() < .7) spawnEnemy(center(poly));
+      map.polys.splice(i, 1);
+      i -= 1;
+    }
+  }
+  
   fire = copyShape(fireTemplate);
   pistol = copyShape(pistolTemplate); pistol.viewmodel = true; shapes.push(pistol); 
   smg = copyShape(smgTemplate); smg.viewmodel = true; 
@@ -43,6 +50,7 @@ function resetValues() {
     normalPos: [-1.2, -.5, 2.5],
     aimPos: [0, -.24, 2.5],
     recoil: 1,
+    damage: 20,
     cooldown: 2,
     slot: 1,
     ammo: 15,
@@ -57,6 +65,7 @@ function resetValues() {
     normalPos: [-2, -1, 3],
     aimPos: [0, -.79, 2],
     recoil: 1.2,
+    damage: 12,
     cooldown: 2,
     fovFactor: .7,
     slot: 2,
@@ -66,12 +75,13 @@ function resetValues() {
   });
   weaponTraits.set(shotgun, {
     name: "Shotgun",
-    automatic: false,
+    automatic: true,
     runningBloom: 0.2,
     defaultBloom: 0*Math.PI/70,
     normalPos: [-3, -1.5, 8],
     aimPos: [0, -.9, 6],
     recoil: 10,
+    damage: 15,
     cooldown: 15,
     shots: 7,
     spread: Math.PI/30,
@@ -87,10 +97,11 @@ function resetValues() {
     runningBloom: 2,
     defaultBloom: Math.PI/200,
     normalPos: [-2, -2, 7],
-    aimPos: [0, -1.57, 7],
+    aimPos: [0, -1.57, 6],
     recoil: 5,
+    damage: 70,
     cooldown: 30,
-    fovFactor: .2,
+    fovFactor: .3,
     slot: 4,
     ammo: 1,
     totalAmmo: 1,
@@ -271,10 +282,11 @@ class Shape {
     let rotationX = matrix.from([[Math.cos(direction[2]), -Math.sin(direction[2]), 0], [Math.sin(direction[2]), Math.cos(direction[2]), 0], [0, 0, 1]]);
     let rotationY = matrix.from([[Math.cos(direction[0]), 0, Math.sin(-direction[0])], [0, 1, 0], [Math.sin(direction[0]), 0, Math.cos(direction[0])]]);
     let rotationZ = matrix.from([[1, 0, 0], [0, Math.cos(-direction[1]), -Math.sin(-direction[1])], [0, Math.sin(-direction[1]), Math.cos(-direction[1])]]);
+    let fullRotation = rotationY.multiply(rotationZ).multiply(rotationX);
     
     this.rotatedPolys = this.polys.map(poly => {
       let pts = poly.map(pt => [[pt[0]-this.offset[0]], [pt[1]-this.offset[1]], [pt[2]-this.offset[2]]]);
-      pts = pts.map(pt => (rotationY.multiply(rotationZ).multiply(rotationX).multiply(matrix.from(pt)).list));
+      pts = pts.map(pt => (fullRotation.multiply(matrix.from(pt)).list));
       pts = pts.map(pt => [[Number(pt[0][0]+this.offset[0])], [Number(pt[1][0]+this.offset[1])], [Number(pt[2][0]+this.offset[2])]]);
       let newPoly = pts;
       newPoly.mtl = poly.mtl;
@@ -364,9 +376,7 @@ function ptHitsTri(pt, radius, tri, data) {
   let expectedOuterDistance = distance(firstpoint, pt) * Math.sin(angleBetween(pt, firstpoint, secondpoint));
   let distanceAlong = distance(firstpoint, pt) * Math.cos(angleBetween(pt, firstpoint, secondpoint))
   if (expectedOuterDistance <= radius) {
-    //console.log(data["sphereCenter"], plus(firstpoint, times(minus(firstpoint, secondpoint), -distanceAlong)));
     return data["vec"] ? times(minus(data["sphereCenter"], plus(firstpoint, times(unit(minus(secondpoint, firstpoint)), distanceAlong))), step) : true;
-    return data["vec"] ? times(data["poly"].cross, distInDir(data["poly"].cross, center(data["poly"]), data["sphereCenter"]) > 0 ? step : -step) : true;
   }
   return false;
 }
@@ -381,18 +391,31 @@ function sphereHitsPoly(sphereCenter, radius, poly, vec=false) {
   }
   return false;
 }
-function rayHitsPoly(start, poly, vector) {
+function rayHitsPoly(start, poly, vector, maxDistance=Infinity) {
   vector = unit(vector);
   let centroid = center(poly);
   let dist = distInDir(poly.cross, centroid, start);
   let normal = dist < 0 ? poly.cross : times(poly.cross, -1);
   let angle = Math.acos(dotProduct(vector, normal));
   if (angle >= Math.PI/2) {return false;}
-  let potentialCollision = plus(start, times(vector, Math.abs(dist)/Math.cos(angle)));
+  let distance = Math.abs(dist)/Math.cos(angle);
+  if (distance > maxDistance) return false;
+  let potentialCollision = plus(start, times(vector, distance));
   if (ptHitsTri(potentialCollision, 0, poly)) {
-    return {collision: potentialCollision, distance: Math.abs(dist)/Math.cos(angle)};
+    return {collision: potentialCollision, distance: distance};
   }
   return false;
+}
+function lineOfSight(start, shapes, end) {
+  let vec = minus(end, start);
+  let dist = distance(vec);
+  for (let shape of shapes) {
+    for (let poly of shape.polys) {
+      let collision = rayHitsPoly(start, poly, vec, dist);
+      if (collision) return false;
+    }
+  }
+  return true;
 }
 function findRaycast(start, shapes, vector) {
   let closest = null;
@@ -445,9 +468,6 @@ setInterval(function() {
     let cameraSpeed = 1;
     camFollow = player;
     if (camFollow === null) {} else {
-      camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
-      camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
-      camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       player.turn([camAngle[0]-player.rotate[0], 0, 0]);
 
       let accelVec = [0, 0];
@@ -478,7 +498,7 @@ setInterval(function() {
             let collides = sphereHitsPoly(player.offset, playerRadius, poly)
             if (collides !== false) {
               if (playerVel[1] < 0) {
-                if (-playerVel[1] > 5) {
+                if (-playerVel[1] > 3) {
                   hp -= -playerVel[1]*4;
                   pain += .3;
                 }
@@ -497,6 +517,9 @@ setInterval(function() {
         } else {
           playerVel[1] -= gravity/physicsSteps;
         }
+        camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
+        camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
+        camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
 
         if (keys["r"] && weaponTraits.get(gun).ammo !== weaponTraits.get(gun).totalAmmo && !reloading) {
           reloading = true;
@@ -537,9 +560,10 @@ setInterval(function() {
         
         shotCooldown = Math.max(shotCooldown-1, 0);
 
-        function spawnShot(startPos, angle, laserStartPos) {
+        function spawnShot(startPos, angle, laserStartPos, damage, target) {
+          if (target === undefined) target = [map];
           let shotVec = vecFromAngle(angle);
-          let hit = findRaycast(startPos, [map], shotVec);
+          let hit = findRaycast(startPos, target, shotVec);
           laserBeam(laserStartPos, hit ? hit.collision : plus(startPos, times(shotVec, 200)));
           if (hit !== null) {
             if (hit.shape === map) {
@@ -549,8 +573,11 @@ setInterval(function() {
               bulletHole.move(minus(hit.collision, bulletHole.offset));
               let cross = hit.poly.cross;
               bulletHole.turn([Math.atan2(cross[2], cross[0])+Math.PI/2, Math.PI/2-Math.atan2(cross[1], Math.sqrt(cross[0]**2+cross[2]**2)), 0]);
-              bulletHole.move(times(cross, distInDir(cross, camPos, center(hit.poly)) < 0 ? .16 : -.16));
+              bulletHole.move(times(cross, distInDir(cross, startPos, center(hit.poly)) < 0 ? .16 : -.16));
               shapes.push(bulletHole);
+            } else if (enemies.includes(hit.shape)) {
+              if (damage !== undefined) hit.shape.health -= damage;
+              hitShot = (hit.shape.health === undefined || hit.shape.health) > 0 ? {state: 1, frames: 5} : {state: 2, frames: 10};
             }
           }
         }
@@ -570,14 +597,29 @@ setInterval(function() {
           let realGunPos = plus(camPos, times(vecFromAngle(camAngle.map((n, idx) => n+barrelAngle[idx])), barrelDist));
           camAngle = [camAngle[0] + (Math.random()-.5)/100, Math.min(Math.PI/2, camAngle[1]+recoil/80*(aimFactor === 1 ? .7 : 1))];
           weaponTraits.get(gun).ammo -= 1;
-          if (weaponTraits.get(gun).shots === undefined) spawnShot(camPos, shotAngle, realGunPos);
+          if (weaponTraits.get(gun).shots === undefined) spawnShot(camPos, shotAngle, realGunPos, weaponTraits.get(gun).damage, [map, ...enemies]);
           else {
             for (let i = 0; i < weaponTraits.get(gun).shots; i++) {
               let newShot = deviate(shotAngle, weaponTraits.get(gun).spread);
-              spawnShot(camPos, newShot, realGunPos);
+              spawnShot(camPos, newShot, realGunPos, weaponTraits.get(gun).damage, [map, ...enemies]);
             }
           }
         }
+      }
+    }
+    for (let i = 0; i < enemies.length; i++) {
+      let enemy = enemies[i];
+      if (enemy.health <= 0) {
+        enemies.splice(i, 1);
+        shapes.splice(shapes.indexOf(enemy), 1);
+        i--;
+        continue;
+      }
+      let angle = (Math.atan2(camPos[2]-enemy.offset[2], camPos[0]-enemy.offset[0])-Math.PI/2) - enemy.rotate[0];
+      angle = Math.min(Math.abs(angle), Math.abs(Math.PI*2-angle)) === Math.abs(angle) ? angle : angle-Math.PI*2;
+      enemy.turn([angle * .2, 0, 0]);
+      if (Math.random() < enemyShotChance && lineOfSight(enemy.offset, [map], camPos)) {
+        spawnShot(enemy.offset, deviate([enemy.rotate[0], -Math.atan2(distance([camPos[0], camPos[2]], [enemy.offset[0], enemy.offset[2]]), camPos[1]-enemy.offset[1])+Math.PI/2, enemy.rotate[1]], enemyBloom), enemy.offset)
       }
     }
     for (let i = 0; i < bulletHoles.length; i++) {
@@ -723,10 +765,16 @@ setInterval(function() {
 		ctx.textAlign = "center";
     drawText(ctx, weaponTraits.get(gun).name, 150/canvasDivision, canvas.height-200/canvasDivision, 50/canvasDivision, "white");
     drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
+
+    if (hitShot.frames > 0) {
+      if (hitShot.state === 1) ctx.drawImage(hitMarker, canvas.width/2+100/canvasDivision, canvas.height/2-25/canvasDivision, 75/canvasDivision, 75/canvasDivision);
+      else ctx.drawImage(skullIcon, canvas.width/2+100/canvasDivision, canvas.height/2-25/canvasDivision, 75/canvasDivision, 75/canvasDivision);
+    }
+    hitShot.frames -= 1;
 		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
     if (fps < 11) canvasDivision += 0.25;
-    if (fps > 15) canvasDivision -= 0.25;
+    if (fps > 14) canvasDivision -= 0.25;
     
 
     if (gameActive) {
@@ -749,13 +797,6 @@ setInterval(function() {
         drawText(ctx, "You Died!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
         ctx.globalAlpha = 1;
         if (pain >= 1) {gameState = "menu"; document.exitPointerLock();}
-      }
-      if (enemyHP <= 0) {
-        pain -= 0.02;
-        ctx.globalAlpha = -Math.max(pain, -.8);
-        drawText(ctx, "You Win!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
-        ctx.globalAlpha = 1;
-        if (pain <= -1) {gameState = "menu"; document.exitPointerLock();}
       }
     }    
   }
@@ -823,6 +864,17 @@ setInterval(function() {
 
 let bulletHoles = [];
 
+let enemies = [];
+function spawnEnemy(pos) {
+  let enemy = copyShape(enemyTemplate);
+  enemy.move(minus(pos, enemy.offset));
+  let enemyHeight = Math.min(...map.polys.map(poly => Math.min(...poly.map(pt => pt[1]))));
+  enemy.move([0, -enemyHeight/2, 0]);
+  enemy.health = 100;
+  enemies.push(enemy);
+  shapes.push(enemy);
+}
+
 let bullets = [];
 function spawnShot(from, target=false) {
   let shot = copyShape(bullet);
@@ -869,7 +921,6 @@ canvas.addEventListener("mousemove", function(e) {
   }
 });
 canvas.addEventListener("mousedown", function(e) {
-  console.log(e)
   if (e.button !== 0) {
     e.preventDefault(); e.stopPropagation();
     if (e.button === 2) {
@@ -954,6 +1005,8 @@ let logo = new Image();
 logo.src = "assets/logo.png";
 let hitMarker = new Image();
 hitMarker.src = "assets/crosshair.svg";
+let skullIcon = new Image();
+skullIcon.src = "assets/skull_icon.png";
 
 function drawText(ctx, text, x, y, size=10, color="black", align="center", font="Arial") {
   ctx.fillStyle = color;
@@ -1019,11 +1072,17 @@ function processMtl(text) {
 let keys = {};
 let mouseDown = false, rightMouseDown = false;
 let mouseX = 0, mouseY = 0;
+function deShift(key) {
+  if ("!@#$%^&*()".includes(key)) {
+    return "1234567890"["!@#$%^&*()".indexOf(key)];
+  }
+  return key;
+}
 document.addEventListener("keydown", function(e) {
-	keys[e.key.toLowerCase()] = true;
+	keys[deShift(e.key.toLowerCase())] = true;
 });
 document.addEventListener("keyup", function(e) {
-	delete keys[e.key.toLowerCase()];
+	delete keys[deShift(e.key.toLowerCase())];
 });
 
 ["bullet", "plane", "desertmap", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
