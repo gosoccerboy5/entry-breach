@@ -468,6 +468,9 @@ setInterval(function() {
     let cameraSpeed = 1;
     camFollow = player;
     if (camFollow === null) {} else {
+      camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
+      camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
+      camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       player.turn([camAngle[0]-player.rotate[0], 0, 0]);
 
       let accelVec = [0, 0];
@@ -517,9 +520,7 @@ setInterval(function() {
         } else {
           playerVel[1] -= gravity/physicsSteps;
         }
-        camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
-        camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
-        camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
+        
 
         if (keys["r"] && weaponTraits.get(gun).ammo !== weaponTraits.get(gun).totalAmmo && !reloading) {
           reloading = true;
@@ -529,7 +530,7 @@ setInterval(function() {
 
         weaponTraits.forEach((traits, otherGun) => {
           if (!reloading && keys[traits.slot.toString()] && otherGun !== gun) {
-            shapes.splice(shapes.indexOf(gun), 1);
+            if (shapes.includes(gun)) shapes.splice(shapes.indexOf(gun), 1);
             shapes.push(otherGun);
             gun = otherGun;
             shotCooldown = 20;
@@ -611,7 +612,7 @@ setInterval(function() {
       let enemy = enemies[i];
       if (enemy.health <= 0) {
         enemies.splice(i, 1);
-        shapes.splice(shapes.indexOf(enemy), 1);
+        if (shapes.includes(enemy)) shapes.splice(shapes.indexOf(enemy), 1);
         i--;
         continue;
       }
@@ -626,7 +627,7 @@ setInterval(function() {
       let bulletHole = bulletHoles[i];
       if (bulletHole.timer <= 0) {
         bulletHoles.splice(i, 1);
-        shapes.splice(shapes.indexOf(bulletHole), 1);
+        if (shapes.includes(bulletHole)) shapes.splice(shapes.indexOf(bulletHole), 1);
         i -= 1;
       }
       bulletHole.timer -= 1;
@@ -635,7 +636,7 @@ setInterval(function() {
       let laserBeam = laserBeams[i];
       if (laserBeam.timer <= 0) {
         laserBeams.splice(i, 1);
-        shapes.splice(shapes.indexOf(laserBeam), 1);
+        if (shapes.includes(laserBeam)) shapes.splice(shapes.indexOf(laserBeam), 1);
         i -= 1;
       }
       laserBeam.timer -= 1;
