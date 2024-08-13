@@ -50,15 +50,15 @@ function resetValues() {
     damage: 20,
     cooldown: 2,
     slot: 1,
-    ammo: 15,
-    totalAmmo: 15,
+    ammo: 20,
+    totalAmmo: 20,
     reloadTime: 40,
   });
   weaponTraits.set(smg, {
     name: "SMG",
     automatic: true,
     runningBloom: .5,
-    defaultBloom: Math.PI/70,
+    defaultBloom: Math.PI/120,
     normalPos: [-2, -1, 3],
     aimPos: [0, -.79, 2],
     recoil: 1.2,
@@ -412,7 +412,7 @@ function lineOfSight(start, shapes, end) {
   let vec = minus(end, start);
   let dist = distance(vec);
   for (let shape of shapes) {
-    for (let poly of shape.polys) {
+    for (let poly of shape.rotatedPolys || shape.polys) {
       let collision = rayHitsPoly(start, poly, vec, dist);
       if (collision) return false;
     }
@@ -422,7 +422,7 @@ function lineOfSight(start, shapes, end) {
 function findRaycast(start, shapes, vector) {
   let closest = null;
   for (let shape of shapes) {
-    for (let poly of shape.polys) {
+    for (let poly of shape.rotatedPolys || shape.polys) {
       let collision = rayHitsPoly(start, poly, vector);
       if (collision && (closest === null || collision.distance < closest.distance)) {
         closest = collision;
@@ -469,7 +469,7 @@ setInterval(function() {
     canvas.height = window.innerHeight/canvasDivision;
     let cameraSpeed = 1;
     camFollow = player;
-    if (camFollow === null) {} else if (gameActive) {
+    if (camFollow === null) {} else if (hp > 0) {
       camPos[0] = camFollow.offset[0] + Math.sin(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       camPos[1] = camFollow.offset[1] - Math.sin(camAngle[1]) * cameraDistance + cameraDistance/5;
       camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
@@ -680,7 +680,7 @@ setInterval(function() {
           pts = pts.map(pt => pt.map(arr=>arr[0]))
           let usable = pts.filter(pt => pt[2] > 0);
           if (usable.length >= 1) {
-            let threshold = .1;
+            let threshold = .15;
             let idx = pts.indexOf(usable[0]);
             let newPts = [];
             
@@ -762,9 +762,6 @@ setInterval(function() {
     ctx.fillStyle = hpColor;
     ctx.roundRect(canvas.width-140/canvasDivision, 20/canvasDivision, Math.max(120*hp/100/canvasDivision, 2), 20/canvasDivision, 10/canvasDivision);
     ctx.fill();
-    pain = gameActive ? Math.min(pain, .4) : pain;
-    ctx.fillStyle = pain >= 0 ? `rgba(255, 0, 0, ${pain})` : `rgba(0, 255, 0, ${-pain})`;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
 		ctx.beginPath();
 		ctx.roundRect(0, canvas.height-250/canvasDivision, 300/canvasDivision, 170/canvasDivision, 5);
@@ -772,18 +769,17 @@ setInterval(function() {
 		ctx.textAlign = "center";
     drawText(ctx, weaponTraits.get(gun).name, 150/canvasDivision, canvas.height-200/canvasDivision, 50/canvasDivision, "white");
     drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
-
     if (hitShot.frames > 0) {
       if (hitShot.state === 1) ctx.drawImage(hitMarker, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
       else ctx.drawImage(skullIcon, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
       if (hitShot.headshot) ctx.drawImage(headshot, canvas.width/2+225/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
     } else hitShot.headshot = false;
     hitShot.frames -= 1;
+    pain = gameActive ? Math.min(pain, .4) : pain;
+    ctx.fillStyle = pain >= 0 ? `rgba(255, 0, 0, ${pain})` : `rgba(0, 255, 0, ${-pain})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
-    if (fps < 11) canvasDivision += 0.25;
-    if (fps > 14) canvasDivision -= 0.25;
-    
 
     if (gameActive) {
       if (hp <= 0) {
@@ -807,10 +803,13 @@ setInterval(function() {
         pain -= 0.02;
         ctx.globalAlpha = -Math.max(pain, -.8);
         drawText(ctx, "You Win!", canvas.width/2, 50/canvasDivision, 50/canvasDivision, "black", "center", "Georgia");
+        accelFactor *= .95;
         ctx.globalAlpha = 1;
         if (pain <= -1) {gameState = "menu"; document.exitPointerLock();}
       }
-    }    
+    }
+    if (fps < 11) canvasDivision += 0.25;
+    if (fps > 14) canvasDivision -= 0.25;
   }
   canvas.style.cursor = "auto";
   if (gameState === "paused") {
@@ -865,12 +864,12 @@ setInterval(function() {
   
   if (gameState === "credits") {
     drawText(ctx, "Credits", canvas.width/2, 30, 40, "black", "center", "Helvetica");
-    drawText(ctx, "Valley Terrain by Zsky [CC-BY] (https://creativecommons.org/licenses/by/3.0/)", canvas.width/2, 70, 20, "black", "center", "Verdana");
-    drawText(ctx, "via Poly Pizza (https://poly.pizza/m/u78ByZHYB2); modified", canvas.width/2, 92, 20, "black", "center", "Verdana");
+    drawText(ctx, "Valley Terrain by Zsky [CC-BY] (https://creativecommons.org/licenses/by/3.0/)", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
+    drawText(ctx, "via Poly Pizza (https://poly.pizza/m/u78ByZHYB2); modified", canvas.width/2, 92, 20, "black", "center", "Trebuchet MS");
   }
   if (gameState === "instructions") {
     drawText(ctx, "Instructions", canvas.width/2, 30, 40, "black", "center", "Helvetica");
-    drawText(ctx, "WIP: currently WASD, space, mouse to move and shoot, keys 1-4 to select gun, q/RMB to aim, and r to reload", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
+    drawText(ctx, "WASD/space to move, mouse to shoot, keys 1-4 to select gun, q/RMB to aim, shift to walk, and r to reload", canvas.width/2, 70, 20, "black", "center", "Trebuchet MS");
   }
 }, 30);
 
