@@ -9,7 +9,7 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null, enemyDamage = null, frameBounds = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null, enemyDamage = null, frameBounds = null, showCrosshair = null;
 let bulletVel = null;
 let mapBoundaries = null;
 let gameActive = false;
@@ -17,7 +17,7 @@ let gameActive = false;
 let player = null, enemy = null, map = null, fire = null, pistol = null, smg = null, shotgun = null, sniper = null;
 
 function resetValues() {
-  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; 
+  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; showCrosshair = true;
   jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/25; enemyShotChance = .1; enemyDamage = 10; frameBounds = [11, 14];
   hitShot = {state: 1, frames: 0};
   shapes = []; bullets = []; enemies = []; lasers = [];
@@ -125,6 +125,10 @@ function interpolateDepth(d1, d2, distAlong, fullDist) {
   return (d2-d1)*(distAlong/fullDist)+d1;
 }
 
+//the following functions use a custom rasterizer and a zbuffer for rendering, see the following:
+//https://en.wikipedia.org/wiki/Z-buffering
+//http://www.sunshine2k.de/coding/java/TriangleRasterization/TriangleRasterization.html
+//https://stackoverflow.com/a/8290734/15938577
 function drawPixel(canvasData, depthBuffer, x, y, r, g, b, depth, viewmodelBuffer, viewmodel=false) {
   if (x < 0 || x >= canvas.width || y < 0 || y > canvas.height) return;
   var index = (x + y * canvas.width) * 4;  
@@ -147,14 +151,14 @@ function drawTopTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer, v
   if (p1[1] < 0) curXs = [curXs[0]+slope1*-p1[1], curXs[1]+slope2*-p1[1]];
   for (let y = Math.max(0, (p1[1])); y <= Math.min(canvas.height, p2[1]); y++) {
     if (y >= 0 && y <= canvas.height) {
-      depths = [interpolateDepth(p1.depth, p2.depth, y - (p1[1]), p2[1]-(p1[1])), 
-      interpolateDepth(p1.depth, p3.depth, y - (p1[1]), p3[1]-(p1[1]))];
-      if (switched) depths = [depths[1], depths[0]];
       for (let x = Math.max(Math.floor(curXs[0]), 0); x <= Math.min(curXs[1], canvas.width); x++) {
-        drawPixel(canvasData, depthBuffer, Math.round(x), Math.round(y), mtl[0], mtl[1], mtl[2], 
+        drawPixel(canvasData, depthBuffer, Math.round(x), Math.floor(y), mtl[0], mtl[1], mtl[2], 
           1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0])), viewmodelBuffer, viewmodel
         );
       }
+      depths = [interpolateDepth(p1.depth, p2.depth, y - (p1[1]), p2[1]-(p1[1])), 
+        interpolateDepth(p1.depth, p3.depth, y - (p1[1]), p3[1]-(p1[1]))];
+      if (switched) depths = [depths[1], depths[0]];
     }
     curXs[0] += slope1;
     curXs[1] += slope2;
@@ -169,19 +173,21 @@ function drawBottomTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer
   let curXs = [p1[0], p1[0]];
   let depths = [p1.depth, p1.depth];
   if (p1[1] < 0) curXs = [curXs[0]+slope1*-p1[1], curXs[1]+slope2*-p1[1]];
-  for (let y = Math.max((p1[1]), 0); y >= Math.min(canvas.height, p2[1]); y--) {
+  for (let y = Math.max((p1[1]), 0); y >= Math.max(0, p2[1]); y--) {
     if (y >= 0 && y <= canvas.height) {
-      depths = [interpolateDepth(p1.depth, p2.depth, y - (p1[1]), p2[1]-(p1[1])), 
-      interpolateDepth(p1.depth, p3.depth, y - (p1[1]), p3[1]-(p1[1]))];
-      if (switched) depths = [depths[1], depths[0]];
-      for (let x = Math.max((curXs[0]), 0); x <= Math.min(curXs[1], canvas.width); x++) {
-        drawPixel(canvasData, depthBuffer, Math.round(x), Math.round(y), mtl[0], mtl[1], mtl[2], 
-          1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0])), viewmodelBuffer, viewmodel
-        );
+      if (curXs[1]-curXs[0]>=2) {
+        for (let x = Math.max((curXs[0]), 0); x <= Math.min(curXs[1], canvas.width); x++) {
+          drawPixel(canvasData, depthBuffer, Math.round(x), Math.round(y), mtl[0], mtl[1], mtl[2], 
+            1/(curXs[1] === curXs[0] ? depths[0] : interpolateDepth(depths[0], depths[1], x-curXs[0], curXs[1]-curXs[0])), viewmodelBuffer, viewmodel
+          );
+        }
       }
+      depths = [interpolateDepth(p1.depth, p2.depth, y - (p1[1]), p2[1]-(p1[1])), 
+        interpolateDepth(p1.depth, p3.depth, y - (p1[1]), p3[1]-(p1[1]))];
+      if (switched) depths = [depths[1], depths[0]];
     }
     curXs[0] -= slope1;
-    curXs[1] -= slope2;
+    curXs[1] -= slope2; 
   }
 }
 function drawTri(p1, p2, p3, canvasData, depthBuffer, mtl, viewmodelBuffer, viewmodel=false) {
@@ -247,6 +253,8 @@ class matrix {
     return new matrix(list);
   }
 }
+
+//a custom class for 3d objects that allows movement and rotation
 class Shape {
   constructor(polys) {
     this.polys = polys;
@@ -305,6 +313,7 @@ class Shape {
   
 }
 
+//a lot of utility functions that were created out of necessity
 function crossProduct(vec1, vec2) {
   return (matrix.from([[0, -vec1[2], vec1[1]], [vec1[2], 0, -vec1[0]], [-vec1[1], vec1[0], 0]])).multiply(matrix.from([[vec2[0]], [vec2[1]], [vec2[2]]]));
 }
@@ -358,6 +367,9 @@ function distInDir(dirVec, init, pt) {
   if (init === null) init = [0, 0, 0];
   return dotProduct(unit(dirVec), pt.map((n, idx) => n-init[idx]));
 }
+//this function is the basis for all of the bullet and physics collisions - detect flat circle/3d tri collision
+//assuming the circle and triangle are coplanar
+//3 steps: 1, check if the point is within the triangle. 2, check if the radius is outside the triangle but the circle touches a vertex. 3, check if the radius is outside the triangle but the circle touches an edge
 function ptHitsTri(pt, radius, tri, data) {
   if (data === undefined) data = {};
   let centroid = center(tri);
@@ -386,6 +398,7 @@ function ptHitsTri(pt, radius, tri, data) {
   }
   return false;
 }
+//convert a sphere into a coplanar circle and check for collision
 function sphereHitsPoly(sphereCenter, radius, poly, vec=false) {
   let trueCentroid = center(poly);
   let verticalDist = distInDir(poly.cross, trueCentroid, sphereCenter);
@@ -397,6 +410,7 @@ function sphereHitsPoly(sphereCenter, radius, poly, vec=false) {
   }
   return false;
 }
+//find the angle against the cross product of the poly, find the distance along the ray that it should collide (the intersection between the polygon's plane and the ray), and check if the intersection lies on the polygon
 function rayHitsPoly(start, poly, vector, maxDistance=Infinity) {
   vector = unit(vector);
   let centroid = center(poly);
@@ -412,6 +426,7 @@ function rayHitsPoly(start, poly, vector, maxDistance=Infinity) {
   }
   return false;
 }
+//find if a line of sight is unblocked
 function lineOfSight(start, shapes, end) {
   let vec = minus(end, start);
   let dist = distance(vec);
@@ -423,6 +438,7 @@ function lineOfSight(start, shapes, end) {
   }
   return true;
 }
+//shoot a ray through a set of polygons and if it hits some, find the closest hit
 function findRaycast(start, shapes, vector) {
   let closest = null;
   for (let shape of shapes) {
@@ -452,6 +468,7 @@ function circle(x, y, radius) {
 
 let camAngle = [0, 0], camPos = [0, 0, 0];
 
+//convert a 3D coordinate into a 2D screen space coordinate, based on the FOV
 function project(point) {
   return [-point[0]/(point[2])*Math.tan(Math.PI/2-FOV[0]/2)/2*canvas.width+canvas.width/2, -point[1]/Math.abs(point[2])*Math.tan(Math.PI/2-FOV[1]/2)/2*canvas.height+canvas.height/2];
 }
@@ -462,13 +479,16 @@ function clear(canvas) {
 	ctx.closePath();
 }
 
+//keep track of the last frame tick to monitor FPS
 let lastTime = performance.now();
 
 setInterval(function() {
   if (gameState === "playing" && !isLoading) {
+    //if we were just playing and now we are not, we have just paused
     if (keys["p"] || document.pointerLockElement === null || !document.hasFocus()) gameState = "justPaused";
   }
   if (gameState === "playing" && !isLoading) {
+    //dynamically maintain the resolution
     canvas.width = window.innerWidth/canvasDivision;
     canvas.height = window.innerHeight/canvasDivision;
     let cameraSpeed = 1;
@@ -479,6 +499,7 @@ setInterval(function() {
       camPos[2] = camFollow.offset[2] - Math.cos(camAngle[0]) * cameraDistance * Math.cos(camAngle[1]);
       player.turn([camAngle[0]-player.rotate[0], 0, 0]);
 
+      //acceleration and movement from key inputs
       let accelVec = [0, 0];
       if (keys["w"]) accelVec = plus(accelVec, [-Math.sin(camAngle[0]), Math.cos(camAngle[0])]);
       if (keys["s"]) accelVec = plus(accelVec, [Math.sin(camAngle[0]), -Math.cos(camAngle[0])]);
@@ -488,6 +509,7 @@ setInterval(function() {
       playerVel = [horizVel[0], playerVel[1], horizVel[1]];
       let speed = distance([horizVel[0], Math.max(Math.abs(playerVel[1])-.2, 0), horizVel[1]]);
       sway += speed;
+      //2x detailed physics - check horizontal movement first then vertical
       let physicsSteps = 2;
       for (let i = 0; i < physicsSteps; i++) {
         player.move([playerVel[0]/physicsSteps, 0, playerVel[2]/physicsSteps]);
@@ -544,6 +566,7 @@ setInterval(function() {
           }
         });
 
+        //manipulate bloom/spread level and position of viewmodel based on current movement and recoil
         let idealBloom = Math.min(distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*3, playerVel[2]])/5 * weaponTraits.get(gun).runningBloom + weaponTraits.get(gun).defaultBloom * (aimFactor === 1 ? 0.5 : 1), Math.PI/6);
         bloom += (idealBloom-bloom)*.7 + recoil*Math.PI/150;
         if (!reloading && (keys["q"] || rightMouseDown)) aimFactor = Math.min(aimFactor+0.2, 1);
@@ -554,6 +577,7 @@ setInterval(function() {
         gun.turn(minus([0, recoil/30, 0], gun.rotate));
         gun.turn([0, 0, 0]);
         if (reloading) {
+          //reload animation (drop gun down then back up)
           gun.move([0, 15*weaponTraits.get(gun).normalPos[1]*Math.sin(reloadTime/(weaponTraits.get(gun).reloadPerShot ? 
           weaponTraits.get(gun).reloadTime * (weaponTraits.get(gun).totalAmmo-weaponTraits.get(gun).ammo) : weaponTraits.get(gun).reloadTime)*Math.PI), 0]);
           reloadTime -= 1;
@@ -562,12 +586,14 @@ setInterval(function() {
             reloading = false;
           }
         }
-        FOV = FOV.map((n, idx) => trueFOV[idx]* (weaponTraits.get(gun).fovFactor === undefined ? (1-aimFactor/5) : 
+        //if we are aiming, change the FOV and smoothly interpolate in between
+        FOV = FOV.map((n, idx) => trueFOV[idx]*(weaponTraits.get(gun).fovFactor === undefined ? (1-aimFactor/5) : 
           1-(1-weaponTraits.get(gun).fovFactor)*aimFactor));
         recoil = Math.max((recoil-1)*.7, 0);
         
         shotCooldown = Math.max(shotCooldown-1, 0);
 
+        //spawn a shot - first, calculate the shot angle based on camera angle and spread. then check map for ray collisions
         function spawnShot(startPos, angle, laserStartPos, damage, target) {
           if (target === undefined) target = [map];
           let shotVec = vecFromAngle(angle);
@@ -596,6 +622,7 @@ setInterval(function() {
           }
         }
         
+        //when we click, spawn a shot and change camera angle as well as viewmodel
         if (mouseDown && shotCooldown === 0 && weaponTraits.get(gun).ammo > 0 && !reloading) {
           if (!weaponTraits.get(gun).automatic) mouseDown = false;
           shotCooldown += weaponTraits.get(gun).cooldown;
@@ -617,6 +644,8 @@ setInterval(function() {
         }
       }
     }
+
+    //update enemy list, bullet hole list, and bullet tracer list
     if (gameActive) {
         for (let i = 0; i < enemies.length; i++) {
         let enemy = enemies[i];
@@ -653,12 +682,14 @@ setInterval(function() {
       laserBeam.timer -= 1;
     }
 
+    //camera rotation matrices - see https://en.wikipedia.org/wiki/Rotation_matrix
     let yaw = matrix.from([[Math.cos(camAngle[0]), -Math.sin(camAngle[0]), 0], [Math.sin(camAngle[0]), Math.cos(camAngle[0]), 0], [0, 0, 1]]);
     let roll = matrix.from([[1, 0, 0], [0, Math.cos(camAngle[1]), -Math.sin(camAngle[1])], [0, Math.sin(camAngle[1]), Math.cos(camAngle[1])]]);
     let pitch = matrix.from([[Math.cos(camAngle[0]), 0, Math.sin(camAngle[0])], [0, 1, 0], [-Math.sin(camAngle[0]), 0, Math.cos(camAngle[0])]]);
     let transformCamera = roll.multiply(pitch);
     points = []
 
+    //convert each shape into a list of transformed polygons
     let renderList = [];
     for (let shape of shapes) {
       let transformCache = new Map();
@@ -681,6 +712,7 @@ setInterval(function() {
             }
           });
         }
+        //clip polygons that pass partially behind the camera
         if (pts.some(pt => pt[2] < 0)) {
           pts = pts.map(pt => pt.map(arr=>arr[0]))
           let usable = pts.filter(pt => pt[2] > 0);
@@ -723,6 +755,8 @@ setInterval(function() {
         renderList.push(pts);
       }
     }
+
+    //render each polygon
     renderList.sort((a, b) => b.meanZ-a.meanZ);
     var canvasData = ctx.createImageData(canvas.width, canvas.height);
     let depthBuffer = Object.create(null);
@@ -730,6 +764,7 @@ setInterval(function() {
     for (let pts of renderList) {
       drawPoly(pts.map(pt => {let newPt = project(pt); newPt.depth = 1/pt[2][0];  return newPt;}), canvasData, depthBuffer, pts.mtl, viewmodelBuffer, pts.viewmodel);
     }
+    //draw sky (solid color)
     for (let i = 0; i < canvasData.height; i++) {
       for (let j = 0; j < canvasData.width; j++) {
         let index = (j + i * canvas.width) * 4;
@@ -743,18 +778,19 @@ setInterval(function() {
     }
     ctx.putImageData(canvasData, 0, 0);
 
+
+    //UI elements including crosshair, ammo, and health
     let difference = performance.now()-lastTime;
     lastTime = performance.now();
     let fps = 1000/difference;
     drawText(ctx, "FPS: " + Math.round(fps), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
-
+    
     ctx.fillStyle = "rgba(0, 0, 0, .5)";
-    //ctx.fillRect(canvas.width/2-1, canvas.height/2-1, 2, 2);
     ctx.strokeStyle = `rgba(0, 0, 0, ${1-aimFactor/1})`;
     let totalBloom = bloom + (weaponTraits.get(gun).spread || 0);
     let bloomX = project([-Math.cos(Math.PI/2-totalBloom/2), 0, Math.sin(Math.PI/2-totalBloom/2)])[0]-canvas.width/2, 
       bloomY = project([0, -Math.cos(Math.PI/2-totalBloom/2), Math.sin(Math.PI/2-totalBloom/2)])[1]-canvas.height/2;
-    if (gameActive) ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
+    if (gameActive && showCrosshair) ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
     ctx.stroke();
     let hpColor = `rgb(${Math.min((100-hp)*255/50, 255)}, ${Math.min(hp*255/50, 255)}, 0)`;
     ctx.beginPath();
@@ -786,6 +822,7 @@ setInterval(function() {
 		
     pain = gameActive ? Math.max(pain-0.05, 0) : pain;
 
+    //check for game over
     if (gameActive) {
       if (hp <= 0) {
         gameActive = false; resume.visible = false;
@@ -814,11 +851,13 @@ setInterval(function() {
         if (pain <= -1) {gameState = "menu"; document.exitPointerLock();}
       }
     }
+    //maintain a specific framerate by changing resolution
     if (fps < frameBounds[0]) canvasDivision += 0.25;
     if (fps > frameBounds[1]) canvasDivision -= 0.25;
   }
   canvas.style.cursor = "auto";
   if (gameState === "paused") {
+    //if mouse down while paused, resume
     if (mouseDown) {
       (async function() {
         await canvas.requestPointerLock();
@@ -830,6 +869,7 @@ setInterval(function() {
     }
   }
   if (gameState === "justPaused") {
+    //pause screen
     document.exitPointerLock();
     gameState = "paused";
     ctx.fillStyle = "rgba(175, 175, 175, 0.8)";
@@ -841,10 +881,12 @@ setInterval(function() {
     drawText(ctx, "Press 'm' to return to the menu", canvas.width/2, canvas.height/2-30/canvasDivision, 40/canvasDivision, "black", "center", "Helvetica");
   }
   if ((gameState === "playing" || gameState === "paused") && keys["m"]) {
+    //return to menu if m is pressed
     gameState = "menu";
     document.exitPointerLock();
   }
   if (gameState === "menu" || gameState === "credits" || gameState === "instructions") {
+    //draw and handle buttons
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
     clear(canvas);
@@ -879,6 +921,7 @@ setInterval(function() {
   }
 }, 30);
 
+//object lists and spawn functions for bullet holes, tracers, and enemies
 let bulletHoles = [];
 
 let enemies = [];
@@ -952,6 +995,7 @@ document.addEventListener("mouseup", function(e) {
   if (e.button === 2) rightMouseDown = false;
 });
 
+//menu buttons
 class Button {
 	static buttons = [];
 	constructor(left, top, width, height, fill, text, targetScreen, event=function(){}) {
@@ -1042,6 +1086,7 @@ function drawText(ctx, text, x, y, size=10, color="black", align="center", font=
   ctx.fillText(text, x, y);
 }
 
+//unused obj file loader
 let fileInput = document.querySelector("input[type=file]");
 if (fileInput !== null) {
   fileInput.addEventListener("input", async function(e) {
@@ -1054,6 +1099,7 @@ if (fileInput !== null) {
     }
   });
 }
+//create a clone of a shape that is not tied to the old one
 function copyShape(shape) {
   let newShape = new Shape([]);
   for (let poly of shape.polys) {
@@ -1065,6 +1111,7 @@ function copyShape(shape) {
   return newShape;
 }
 
+//parsing obj and mtl files to create objects
 function processObj(text) {
   let vertices = text.match(/\nv (.+?) (.+?) (.+)/g);
   vertices = vertices.map(vertex => vertex.match(/ ([-\.\d]+)/g).map(Number));
@@ -1111,6 +1158,7 @@ document.addEventListener("keyup", function(e) {
 	delete keys[deShift(e.key.toLowerCase())];
 });
 
+//load all objects and materials
 ["bullet", "player", "desertmap", "enemy", "fire", "bullethole", "pistol", "smg", "shotgun", "sniper"].forEach(name => {
   fetch("assets/" + name + ".mtl").then(res => res.text()).then(mtl => {
     processMtl(mtl);
