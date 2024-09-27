@@ -9,7 +9,7 @@ let [cos, sin] = [Math.cos.bind(Math), Math.sin.bind(Math)];
 
 let gameState = "menu";
 
-let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null, enemyDamage = null, frameBounds = null, showCrosshair = null;
+let enemyVel = null, playerVel = null, rollSpeed = null, pitchSpeed = null, enemyRollSpeed = null, enemyPitchSpeed = null, aimAssistRange = null, playerRadius = null, hp = null, enemyHP = null, pain = null, gravity = null, jumpSpeed = null, step = null, accelFactor = null, FOV = null, trueFOV = null, cameraDistance = null, bloom = null, weaponTraits = null, aimFactor = null, gun = null, recoil = null, shotCooldown = null, sway = null, reloading = null, reloadTime = null, enemyBloom = null, enemyShotChance = null, hitShot = null, enemyDamage = null, frameBounds = null, showCrosshair = null, showAmmo = null, showHP = null, showFPS = null, showHits = null, mouseMovement = null, equipTimer = null;
 let bulletVel = null;
 let mapBoundaries = null;
 let gameActive = false;
@@ -17,8 +17,8 @@ let gameActive = false;
 let player = null, enemy = null, map = null, fire = null, pistol = null, smg = null, shotgun = null, sniper = null;
 
 function resetValues() {
-  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; showCrosshair = true;
-  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [Math.PI/1.7, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/25; enemyShotChance = .1; enemyDamage = 10; frameBounds = [11, 14];
+  enemyVel = 1.5; playerVel = [0, 0, 0]; rollSpeed = 0.1; pitchSpeed = 0.04; enemyRollSpeed = 0.07; enemyPitchSpeed = 0.035; aimAssistRange = Math.PI/24; bulletVel = 5; playerRadius = 1.5; hp = 100; enemyHP = 100; pain = 0; showCrosshair = true; showAmmo = true; showHP = true; showFPS = true; showHits = true;
+  jumpSpeed = 1.5; gravity = .4, step = 0.1; accelFactor = 1.2; trueFOV = FOV = [/*Math.PI/1.7*/2.012742, Math.PI/2.2]; cameraDistance = 0; bloom = Math.PI/10; aimFactor = 0; recoil = 0; shotCooldown = 0; sway = 0; reloading = false; reloadTime = 0; enemyBloom = Math.PI/25; enemyShotChance = .1; enemyDamage = 10; frameBounds = [11, 14]; mouseMovement = [0, 0]; equipTimer = 0;
   hitShot = {state: 1, frames: 0};
   shapes = []; bullets = []; enemies = []; lasers = [];
   player = copyShape(playerTemplate); player.move([0, 2, 4]); if (cameraDistance > 0) shapes.push(player); 
@@ -45,7 +45,7 @@ function resetValues() {
     runningBloom: 1.5,
     defaultBloom: Math.PI/50,
     normalPos: [-1.2, -.5, 2.5],
-    aimPos: [0, -.24, 2.5],
+    aimPos: [0, -.24, 2],
     recoil: 1,
     damage: 20,
     cooldown: 2,
@@ -60,11 +60,11 @@ function resetValues() {
     runningBloom: .5,
     defaultBloom: Math.PI/120,
     normalPos: [-2, -1, 3],
-    aimPos: [0, -.79, 2],
-    recoil: 1.2,
+    aimPos: [0, -.79, 2.5],
+    recoil: .5,
     damage: 12,
     cooldown: 2,
-    fovFactor: .7,
+    fovFactor: .5,
     slot: 2,
     ammo: 30,
     totalAmmo: 30,
@@ -75,7 +75,7 @@ function resetValues() {
     automatic: true,
     runningBloom: 0.2,
     defaultBloom: 0*Math.PI/70,
-    normalPos: [-3, -1.5, 8],
+    normalPos: [-3, -1.5, 11],
     aimPos: [0, -.9, 6],
     recoil: 10,
     damage: 15,
@@ -92,13 +92,13 @@ function resetValues() {
     name: "Sniper",
     automatic: false,
     runningBloom: 3,
-    defaultBloom: Math.PI/200,
+    defaultBloom: 0*Math.PI/200,
     normalPos: [-3, -2, 7],
-    aimPos: [0, -1.57, 6],
+    aimPos: [0, -1.57, 8],
     recoil: 5,
     damage: 70,
     cooldown: 30,
-    fovFactor: .25,
+    fovFactor: .22,
     slot: 4,
     ammo: 1,
     totalAmmo: 1,
@@ -135,7 +135,7 @@ function drawPixel(canvasData, depthBuffer, x, y, r, g, b, depth, viewmodelBuffe
   if ((((!viewmodel)||viewmodelBuffer[index]) && (depthBuffer[index] !== undefined && depthBuffer[index] < depth)) || (viewmodelBuffer[index]===true && !viewmodel) || depth < 0) return;
   depthBuffer[index] = depth;
   if (viewmodel) viewmodelBuffer[index] = true;
-  let fogIncrease = 3*Math.sqrt(depth);
+  let fogIncrease = 3*Math.sqrt(Math.min(depth, 500));
   canvasData.data[index + 0] = Math.min(r + fogIncrease, 255);
   canvasData.data[index + 1] = Math.min(g + fogIncrease, 255);
   canvasData.data[index + 2] = Math.min(b + fogIncrease, 255);
@@ -561,7 +561,8 @@ setInterval(function() {
             if (shapes.includes(gun)) shapes.splice(shapes.indexOf(gun), 1);
             shapes.push(otherGun);
             gun = otherGun;
-            shotCooldown = 20;
+            shotCooldown = 10;
+            equipTimer = shotCooldown;
             aimFactor = 0;
           }
         });
@@ -569,13 +570,15 @@ setInterval(function() {
         //manipulate bloom/spread level and position of viewmodel based on current movement and recoil
         let idealBloom = Math.min(distance([playerVel[0], Math.max(0, Math.abs(playerVel[1])-gravity/2)*3, playerVel[2]])/5 * weaponTraits.get(gun).runningBloom + weaponTraits.get(gun).defaultBloom * (aimFactor === 1 ? 0.5 : 1), Math.PI/6);
         bloom += (idealBloom-bloom)*.7 + recoil*Math.PI/150;
-        if (!reloading && (keys["q"] || rightMouseDown)) aimFactor = Math.min(aimFactor+0.2, 1);
-        else aimFactor = Math.max(aimFactor-0.25, 0);
+        if (equipTimer === 0 && !reloading && (keys["q"] || rightMouseDown)) aimFactor = Math.min(aimFactor+1/6, 1);
+        else aimFactor = Math.max(aimFactor-0.2, 0);
         gun.move(minus(weaponTraits.get(gun).normalPos.map((n, idx) => n+(weaponTraits.get(gun).aimPos[idx]-n)*aimFactor), gun.offset));
         gun.move([0, 0, -recoil/3]);
         gun.move([Math.sin(sway/5)*speed/7, Math.cos(sway/2.5)*-speed/10, 0])
         gun.turn(minus([0, recoil/30, 0], gun.rotate));
-        gun.turn([0, 0, 0]);
+        gun.turn([(mouseMovement[0]*0.1+gun.rotate[0])*0.5, (-mouseMovement[1]*0.1+gun.rotate[1])*0.5, 0]);
+        gun.move([0, -equipTimer/1.5, 0]);
+        gun.turn([0, -equipTimer/20, 0]);
         if (reloading) {
           //reload animation (drop gun down then back up)
           gun.move([0, 15*weaponTraits.get(gun).normalPos[1]*Math.sin(reloadTime/(weaponTraits.get(gun).reloadPerShot ? 
@@ -592,13 +595,14 @@ setInterval(function() {
         recoil = Math.max((recoil-1)*.7, 0);
         
         shotCooldown = Math.max(shotCooldown-1, 0);
+        equipTimer = Math.max(equipTimer-1, 0);
 
         //spawn a shot - first, calculate the shot angle based on camera angle and spread. then check map for ray collisions
         function spawnShot(startPos, angle, laserStartPos, damage, target) {
           if (target === undefined) target = [map];
           let shotVec = vecFromAngle(angle);
           let hit = findRaycast(startPos, target, shotVec);
-          laserBeam(laserStartPos, hit ? hit.collision : plus(startPos, times(shotVec, 200)));
+          laserBeam(laserStartPos, hit ? hit.collision : plus(startPos, times(shotVec, 300)));
           if (hit !== null) {
             if (hit.shape === map) {
               let bulletHole = copyShape(bulletHoleTemplate);
@@ -778,16 +782,15 @@ setInterval(function() {
     }
     ctx.putImageData(canvasData, 0, 0);
 
-
     //UI elements including crosshair, ammo, and health
     let difference = performance.now()-lastTime;
     lastTime = performance.now();
     let fps = 1000/difference;
-    drawText(ctx, "FPS: " + Math.round(fps), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
+    if (showFPS) drawText(ctx, "FPS: " + Math.round(fps), canvas.width-114/canvasDivision, canvas.height-24/canvasDivision, 30/canvasDivision, "black", "left");
     
     ctx.fillStyle = "rgba(0, 0, 0, .5)";
     ctx.strokeStyle = `rgba(0, 0, 0, ${1-aimFactor/1})`;
-    let totalBloom = bloom + (weaponTraits.get(gun).spread || 0);
+    let totalBloom = Math.max(bloom + (weaponTraits.get(gun).spread || 0), Math.PI/500);
     let bloomX = project([-Math.cos(Math.PI/2-totalBloom/2), 0, Math.sin(Math.PI/2-totalBloom/2)])[0]-canvas.width/2, 
       bloomY = project([0, -Math.cos(Math.PI/2-totalBloom/2), Math.sin(Math.PI/2-totalBloom/2)])[1]-canvas.height/2;
     if (gameActive && showCrosshair) ctx.ellipse(canvas.width/2, canvas.height/2, bloomX, bloomY, 0, 0, Math.PI*2);
@@ -795,22 +798,26 @@ setInterval(function() {
     let hpColor = `rgb(${Math.min((100-hp)*255/50, 255)}, ${Math.min(hp*255/50, 255)}, 0)`;
     ctx.beginPath();
     ctx.fillStyle = "black";
-    ctx.strokeWidth = 5;
-    ctx.roundRect(canvas.width-143/canvasDivision, 17/canvasDivision, 126/canvasDivision, 26/canvasDivision, 13/canvasDivision);
-    ctx.fill();
-    ctx.closePath();
-    ctx.beginPath();
-    ctx.fillStyle = hpColor;
-    ctx.roundRect(canvas.width-140/canvasDivision, 20/canvasDivision, Math.max(120*hp/100/canvasDivision, 2), 20/canvasDivision, 10/canvasDivision);
-    ctx.fill();
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
-		ctx.beginPath();
-		ctx.roundRect(0, canvas.height-250/canvasDivision, 300/canvasDivision, 170/canvasDivision, 5);
-		ctx.fill();
-		ctx.textAlign = "center";
-    drawText(ctx, weaponTraits.get(gun).name, 150/canvasDivision, canvas.height-200/canvasDivision, 50/canvasDivision, "white");
-    drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
-    if (hitShot.frames > 0) {
+    if (showHP) {
+      ctx.strokeWidth = 5;
+      ctx.roundRect(canvas.width-143/canvasDivision, 17/canvasDivision, 126/canvasDivision, 26/canvasDivision, 13/canvasDivision);
+      ctx.fill();
+      ctx.closePath();
+      ctx.beginPath();
+      ctx.fillStyle = hpColor;
+      ctx.roundRect(canvas.width-140/canvasDivision, 20/canvasDivision, Math.max(120*hp/100/canvasDivision, 2), 20/canvasDivision, 10/canvasDivision);
+      ctx.fill();
+    }
+    if (showAmmo) {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+      ctx.beginPath();
+      ctx.roundRect(0, canvas.height-250/canvasDivision, 300/canvasDivision, 170/canvasDivision, 5);
+      ctx.fill();
+      ctx.textAlign = "center";
+      drawText(ctx, weaponTraits.get(gun).name, 150/canvasDivision, canvas.height-200/canvasDivision, 50/canvasDivision, "white");
+      drawText(ctx, reloading ? "Reloading" : `${weaponTraits.get(gun).ammo}/${weaponTraits.get(gun).totalAmmo}`, 150/canvasDivision, canvas.height-130/canvasDivision, 50/canvasDivision, (reloading || weaponTraits.get(gun).ammo === 0) ? "red" : "white");
+    }
+    if (hitShot.frames > 0 && showHits) {
       if (hitShot.state === 1) ctx.drawImage(hitMarker, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
       else ctx.drawImage(skullIcon, canvas.width/2+100/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
       if (hitShot.headshot) ctx.drawImage(headshot, canvas.width/2+225/canvasDivision, canvas.height/2-50/canvasDivision, 100/canvasDivision, 100/canvasDivision);
@@ -974,6 +981,7 @@ canvas.addEventListener("mousemove", function(e) {
     let factor = FOV[0] / trueFOV[0];
     camAngle[0] += e.movementX/200 * factor;
     camAngle[1] = Math.max(Math.min(camAngle[1]-e.movementY/200*factor, Math.PI/2), -Math.PI/2);
+    mouseMovement = [e.movementX/200, e.movementY/200];
   } else {
     let bd = canvas.getBoundingClientRect();
     let mousePos = [(e.clientX - bd.left)*canvas.width/Number(getComputedStyle(canvas).width.replace("px", "")), (e.clientY - bd.top)*canvas.height/Number(getComputedStyle(canvas).height.replace("px", ""))];
